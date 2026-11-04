@@ -37,6 +37,9 @@ describe("RPC authorization scopes", () => {
 
   it("keeps webhook delivery logs, which hold request bodies, behind operate scope", () => {
     for (const method of [
+      WS_METHODS.voiceStart,
+      WS_METHODS.voiceStop,
+      WS_METHODS.voiceState,
       WS_METHODS.scheduledTasksListWebhookDeliveries,
       WS_METHODS.scheduledTasksGetWebhookDelivery,
       WS_METHODS.scheduledTasksRotateWebhookToken,

@@ -26,8 +26,6 @@ import { environmentShell } from "../../state/shell";
 import { environmentThreadShells } from "../../state/threads";
 import { Button } from "../ui/button";
 
-/** Pending blocks all rendering, including EventRouter welcome navigation. */
-
 const FIRST_RUN_DECISION_TIMEOUT_MS = 4_000;
 
 const primaryShellLiveAtom = Atom.make((get) => {
@@ -197,7 +195,7 @@ function FirstRunRecovery({
         <p className="mt-2 text-sm text-muted-foreground">
           {settingsReadFailed
             ? "Your saved settings could not be loaded."
-            : "T3 Code could not confirm this workspace."}
+            : "Monarch could not confirm this workspace."}
         </p>
         <Button
           className="mt-5"

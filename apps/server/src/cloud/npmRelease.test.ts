@@ -47,6 +47,7 @@ const makeService = Effect.fnUntraced(function* (
     Effect.provideService(ProcessRunner.ProcessRunner, { run }),
     Effect.provideService(HttpClient.HttpClient, publicRegistry),
     Effect.provideService(HostProcess.Environment, {
+      MONARCH_NPM_PACKAGE: "@mauri3112/monarch",
       PATH: npmInstalled ? npmBin : "",
       PATHEXT: ".CMD",
     }),
@@ -81,7 +82,14 @@ it.effect.each([
     expect(calls).toHaveLength(1);
     expect(calls[0]).toMatchObject({
       command: expect.stringMatching(/[/\\]npm(?:\.cmd)?$/i),
-      args: ["view", "--global", "--json", `t3@${fixture.spec}`, "version", "t3code"],
+      args: [
+        "view",
+        "--global",
+        "--json",
+        `@mauri3112/monarch@${fixture.spec}`,
+        "version",
+        "t3code",
+      ],
       maxOutputBytes: 256 * 1024,
     });
     yield* TestClock.adjust("1 minute");
@@ -153,9 +161,9 @@ it.effect("falls back to public npm only when npm is not installed", () =>
     yield* TestClock.adjust("15 seconds");
     expect(Result.isFailure(yield* Fiber.join(stalled))).toBe(true);
     expect(urls).toEqual([
-      "https://registry.npmjs.org/t3/nightly",
-      "https://registry.npmjs.org/t3/9.9.9",
-      "https://registry.npmjs.org/t3/latest",
+      "https://registry.npmjs.org/%40mauri3112%2Fmonarch/nightly",
+      "https://registry.npmjs.org/%40mauri3112%2Fmonarch/9.9.9",
+      "https://registry.npmjs.org/%40mauri3112%2Fmonarch/latest",
     ]);
   }),
 );
@@ -195,4 +203,18 @@ it.effect.each(["--registry=https://example.com", "../other", "other-package@lat
       const service = yield* makeService(() => Effect.die("invalid specs must not spawn npm"));
       expect(Result.isFailure(yield* service.get({ spec }).pipe(Effect.result))).toBe(true);
     }),
+);
+
+it.effect("does not query npm or the network without a Monarch package", () =>
+  Effect.gen(function* () {
+    const service = yield* NpmRelease.make().pipe(
+      Effect.provideService(ProcessRunner.ProcessRunner, {
+        run: () => Effect.die("unexpected npm command"),
+      }),
+      Effect.provideService(HttpClient.HttpClient, noPublicRegistry),
+      Effect.provideService(HostProcess.Environment, {}),
+    );
+    const error = yield* service.get({ spec: "latest" }).pipe(Effect.flip);
+    expect(error.reason).toContain("no npm update channel");
+  }).pipe(Effect.provide(NodeServices.layer)),
 );

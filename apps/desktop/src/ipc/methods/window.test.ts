@@ -211,8 +211,9 @@ describe("installRelayTelemetryEnabled", () => {
 
   it.effect("reads the desktop host opt-out before returning the renderer policy", () =>
     Effect.gen(function* () {
-      assert.isFalse(yield* relayTelemetryEnabled({ T3CODE_TELEMETRY_ENABLED: "false" }));
-      assert.isTrue(yield* relayTelemetryEnabled({}));
+      assert.isFalse(yield* relayTelemetryEnabled({ MONARCH_TELEMETRY_ENABLED: "false" }));
+      assert.isFalse(yield* relayTelemetryEnabled({}));
+      assert.isTrue(yield* relayTelemetryEnabled({ MONARCH_TELEMETRY_ENABLED: "true" }));
     }),
   );
 
@@ -223,8 +224,18 @@ describe("installRelayTelemetryEnabled", () => {
         organization: "Example Corp",
         limits,
       });
-      assert.isFalse(yield* relayTelemetryEnabled({}, policy({ telemetry: false })));
-      assert.isTrue(yield* relayTelemetryEnabled({}, policy({ webhookTasks: false })));
+      assert.isFalse(
+        yield* relayTelemetryEnabled(
+          { MONARCH_TELEMETRY_ENABLED: "true" },
+          policy({ telemetry: false }),
+        ),
+      );
+      assert.isTrue(
+        yield* relayTelemetryEnabled(
+          { MONARCH_TELEMETRY_ENABLED: "true" },
+          policy({ webhookTasks: false }),
+        ),
+      );
       // A policy that cannot be read fails closed.
       assert.isFalse(
         yield* relayTelemetryEnabled(

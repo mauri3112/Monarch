@@ -120,6 +120,8 @@ import * as ThreadManagementService from "./orchestration-v2/ThreadManagementSer
 import * as CommandOutputHub from "./orchestration-v2/CommandOutputHub.ts";
 import * as McpAppRequests from "./mcpApps/McpAppRequests.ts";
 import * as ProviderSessionManager from "./orchestration-v2/ProviderSessionManager.ts";
+import * as VoiceSessionService from "./orchestration-v2/VoiceSessionService.ts";
+import { VoiceError } from "@t3tools/contracts";
 import * as ThreadLaunchService from "./orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadMessageIntake from "./orchestration-v2/ThreadMessageIntake.ts";
 import * as DocumentText from "./provider/DocumentText.ts";
@@ -1995,7 +1997,18 @@ export const layerWsRpc = (
         return yield* mutateProjectWithClone(projectService, projectCloneTracker, mutation);
       });
 
+      const voiceSessions = yield* VoiceSessionService.VoiceSessionService;
       const handlers = ServerWsRpcGroup.of({
+        [WS_METHODS.voiceCapability]: (input) => voiceSessions.capability(input.threadId),
+        [WS_METHODS.voiceStart]: (input) =>
+          startup.enqueueCommand(voiceSessions.start(input, currentSessionId)).pipe(
+            Effect.catchTags({
+              ServerRuntimeStartupError: (cause) =>
+                Effect.fail(new VoiceError({ reason: "connection", cause })),
+            }),
+          ),
+        [WS_METHODS.voiceStop]: (input) => voiceSessions.stop(input, currentSessionId),
+        [WS_METHODS.voiceState]: (input) => voiceSessions.state(input, currentSessionId),
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
             "orchestration_v2.command_id": command.commandId,

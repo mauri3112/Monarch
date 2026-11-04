@@ -1,8 +1,14 @@
-import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import { Outlet, createFileRoute, redirect, useMatches } from "@tanstack/react-router";
+import { scopedProjectKey, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
+import { Outlet, createFileRoute, redirect, useMatches, useParams } from "@tanstack/react-router";
 import { useState } from "react";
 
-import { ThreadRouteView } from "../components/ThreadRouteView";
+import { MonarchWorkspace } from "../monarch/MonarchWorkspace";
+import {
+  CodexBrainstormProjectAction,
+  CodexBrainstormThreadAction,
+} from "../monarch/brainstorm/CodexBrainstorm";
+import { resolveWorkspaceProjectRef } from "../monarch/projectWorkspace.logic";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
 import { SidebarInset } from "../components/ui/sidebar";
 import { resolveThreadRouteTarget, type ThreadRouteTarget } from "../threadRoutes";
@@ -15,9 +21,18 @@ function threadRouteTargetKey(target: ThreadRouteTarget | null) {
   return target.kind === "server" ? scopedThreadKey(target.threadRef) : target.draftId;
 }
 
+function projectBrainstormAction(projectRef: ScopedProjectRef) {
+  return <CodexBrainstormProjectAction projectRef={projectRef} />;
+}
+
+function threadBrainstormAction(threadRef: ScopedThreadRef) {
+  return <CodexBrainstormThreadAction threadRef={threadRef} />;
+}
+
 function ChatRouteLayout() {
   // Render both routes here so draft promotion keeps the same ChatView mounted.
   const threadTarget = useThreadRouteTarget();
+  const projectRef = resolveWorkspaceProjectRef(useParams({ strict: false }));
   // Read matches, not location, so this agrees with the params useThreadRouteTarget reads.
   const modalOpen = useMatches({
     select: (matches) => matches.some((match) => isAppModalPage(match.pathname)),
@@ -27,14 +42,29 @@ function ChatRouteLayout() {
   if (!modalOpen && threadRouteTargetKey(backgroundTarget) !== threadRouteTargetKey(threadTarget)) {
     setBackgroundTarget(threadTarget);
   }
+  const [backgroundProjectRef, setBackgroundProjectRef] = useState(projectRef);
+  if (
+    !modalOpen &&
+    (backgroundProjectRef ? scopedProjectKey(backgroundProjectRef) : null) !==
+      (projectRef ? scopedProjectKey(projectRef) : null)
+  ) {
+    setBackgroundProjectRef(projectRef);
+  }
   const shownTarget = modalOpen ? backgroundTarget : threadTarget;
+  const shownProjectRef = modalOpen ? backgroundProjectRef : projectRef;
   return (
     <>
       {shownTarget?.kind === "server" && !modalOpen ? (
         <ThreadLinkPrompt threadRef={shownTarget.threadRef} />
       ) : null}
-      {shownTarget ? (
-        <ThreadRouteView target={shownTarget} background={modalOpen} />
+      {shownTarget || shownProjectRef ? (
+        <MonarchWorkspace
+          target={shownTarget}
+          projectRef={shownProjectRef}
+          background={modalOpen}
+          projectActions={projectBrainstormAction}
+          threadActions={threadBrainstormAction}
+        />
       ) : modalOpen ? (
         <SidebarInset className="h-dvh" />
       ) : (

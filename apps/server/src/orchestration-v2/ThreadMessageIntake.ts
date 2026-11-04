@@ -85,8 +85,11 @@ const withGuestAttachments = Effect.fn("ThreadMessageIntake.withGuestAttachments
 export const dispatchCommand = Effect.fn("ThreadMessageIntake.dispatchCommand")(function* (
   incoming: OrchestrationV2Command,
 ) {
+  // Voice admission owns this marker; public message dispatch cannot claim a microphone session.
+  const sanitized =
+    incoming.type === "message.dispatch" ? { ...incoming, voiceSessionId: undefined } : incoming;
   const command =
-    incoming.type === "message.dispatch" ? yield* withGuestAttachments(incoming) : incoming;
+    sanitized.type === "message.dispatch" ? yield* withGuestAttachments(sanitized) : sanitized;
   const threads = yield* ThreadManagement.ThreadManagementService;
   if (command.type === "runtime-request.respond" && command.attachmentsByQuestionId) {
     const config = yield* ServerConfig.ServerConfig;

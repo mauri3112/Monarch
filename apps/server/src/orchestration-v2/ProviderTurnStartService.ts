@@ -18,6 +18,7 @@ import {
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as VoiceSessions from "./VoiceSessions.ts";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -148,6 +149,7 @@ export const layer: Layer.Layer<
 > = Layer.effect(
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
+    const voiceSessions = yield* Effect.serviceOption(VoiceSessions.VoiceSessions);
     const eventSink = yield* EventSink.EventSinkV2;
     const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
@@ -1678,11 +1680,45 @@ export const layer: Layer.Layer<
         !noteContinuation
           ? session
           : makeDeliverySession(session, startWithHandoffs);
+      const ownedSession =
+        message.voiceSessionId === undefined
+          ? deliverySession
+          : {
+              ...deliverySession,
+              startTurn: Effect.fn("ProviderTurnStartService.startVoice")(function* (
+                turnInput: ProviderAdapter.ProviderAdapterV2TurnInput,
+              ) {
+                if (Option.isNone(voiceSessions) || session.driver !== "codex")
+                  return yield* new ProviderAdapter.ProviderAdapterTurnStartError({
+                    driver: session.driver,
+                    threadId: projection.thread.id,
+                    providerThreadId: providerThread.id,
+                    runId: run.id,
+                  });
+                const voice = yield* voiceSessions.value
+                  .claim(message.voiceSessionId!, projection.thread.id)
+                  .pipe(
+                    Effect.mapError(
+                      (cause) =>
+                        new ProviderAdapter.ProviderAdapterTurnStartError({
+                          driver: session.driver,
+                          threadId: projection.thread.id,
+                          providerThreadId: providerThread.id,
+                          runId: run.id,
+                          cause,
+                        }),
+                    ),
+                  );
+                yield* deliverySession
+                  .startTurn({ ...turnInput, voice })
+                  .pipe(Effect.tapError(() => voice.fail("connection")));
+              }),
+            };
       return runExecution.startRootRun({
         commandId: CommandId.make(`command:effect:provider-turn.start:${run.id}`),
         appThread: projection.thread,
         providerSessionId,
-        session: deliverySession,
+        session: ownedSession,
         run: runningRun,
         rootNode: runningRootNode,
         checkpointScope,

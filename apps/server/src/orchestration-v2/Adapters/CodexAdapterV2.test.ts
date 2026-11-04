@@ -1369,6 +1369,405 @@ describe("CodexAdapterV2 post-settle continuation", () => {
       };
     });
 
+  it.effect.each(["between-turns", "during-turn", "rejected-start", "async-error"] as const)(
+    "voice owns multiple delegated turns and stops %s",
+    (stopAt) =>
+      Effect.gen(function* () {
+        const nativeThreadId = `voice-${stopAt}`;
+        const failures: string[] = [];
+        let closed = 0;
+        const releaseSecond = yield* Deferred.make<void>();
+        const stop = yield* Deferred.make<Effect.Effect<void>>();
+        const answer = yield* Deferred.make<string>();
+        const emit = (
+          method: string,
+          params: Record<string, unknown>,
+          label = method,
+        ): CodexReplay.CodexAppServerReplayEntry => ({
+          type: "emit_inbound",
+          label,
+          frame: { method, params: { threadId: nativeThreadId, ...params } },
+        });
+        const turn = (id: string, completed: boolean) =>
+          emit(
+            completed ? "turn/completed" : "turn/started",
+            { turn: makeCodexReplayTurn({ id, status: completed ? "completed" : "inProgress" }) },
+            `${id}-${completed ? "done" : "start"}`,
+          );
+        const transcript = makeCodexReplayTranscript({
+          scenario: nativeThreadId,
+          entries: [
+            ...codexReplayPreamble({
+              nativeThreadId,
+              nativeTurnId: "unused",
+              prompt: "unused",
+            }).slice(0, 5),
+            {
+              type: "expect_outbound",
+              label: "subscription",
+              frame: { id: 3, method: "account/read", params: { refreshToken: false } },
+            },
+            {
+              type: "emit_inbound",
+              label: "subscription",
+              frame: {
+                id: 3,
+                result: {
+                  account: { type: "chatgpt", email: null, planType: "plus" },
+                  requiresOpenaiAuth: true,
+                },
+              },
+            },
+            {
+              type: "expect_outbound",
+              label: "native-provider",
+              frame: {
+                id: 4,
+                method: "thread/read",
+                params: { threadId: nativeThreadId, includeTurns: false },
+              },
+            },
+            {
+              type: "emit_inbound",
+              label: "native-provider",
+              frame: {
+                id: 4,
+                result: {
+                  thread: (
+                    codexReplayPreamble({
+                      nativeThreadId,
+                      nativeTurnId: "unused",
+                      prompt: "unused",
+                    })[4]! as { frame: { result: { thread: unknown } } }
+                  ).frame.result.thread,
+                },
+              },
+            },
+            {
+              type: "expect_outbound",
+              label: "policy",
+              frame: {
+                id: 5,
+                method: "thread/settings/update",
+                params: {
+                  threadId: nativeThreadId,
+                  cwd: "/workspace",
+                  model: "gpt-5.4",
+                  summary: "detailed",
+                  approvalPolicy: "untrusted",
+                  approvalsReviewer: "user",
+                  sandboxPolicy: { type: "readOnly" },
+                  collaborationMode: { mode: "default", settings: { model: "gpt-5.4" } },
+                },
+              },
+            },
+            { type: "emit_inbound", label: "policy", frame: { id: 5, result: {} } },
+            {
+              type: "expect_outbound",
+              label: "voice-start",
+              frame: {
+                id: 6,
+                method: "thread/realtime/start",
+                params: {
+                  threadId: nativeThreadId,
+                  version: "v3",
+                  transport: { type: "webrtc", sdp: "offer" },
+                  outputModality: "audio",
+                  clientManagedHandoffs: false,
+                  voiceSessionId: "voice-session",
+                  includeStartupContext: true,
+                  flushTranscriptTailOnSessionEnd: false,
+                },
+              },
+            },
+            ...(stopAt === "rejected-start"
+              ? [
+                  {
+                    type: "emit_inbound" as const,
+                    label: "rejected-start",
+                    frame: { id: 6, error: { code: -32601, message: "Realtime is unavailable" } },
+                  },
+                ]
+              : stopAt === "async-error"
+                ? ([
+                    {
+                      type: "emit_inbound",
+                      label: "voice-start-ack",
+                      frame: { id: 6, result: {} },
+                    },
+                    emit("thread/realtime/error", { message: "Account cannot use realtime" }),
+                    {
+                      type: "expect_outbound",
+                      label: "voice-stop",
+                      frame: {
+                        id: 7,
+                        method: "thread/realtime/stop",
+                        params: { threadId: nativeThreadId },
+                      },
+                    },
+                    { type: "emit_inbound", label: "voice-stop-ack", frame: { id: 7, result: {} } },
+                    emit("thread/realtime/closed", { reason: "error" }),
+                  ] satisfies CodexReplay.CodexAppServerReplayEntry[])
+                : ([
+                    emit("thread/realtime/sdp", { sdp: "answer" }),
+                    {
+                      type: "emit_inbound",
+                      label: "voice-start-ack",
+                      frame: { id: 6, result: {} },
+                    },
+                    emit("thread/realtime/transcript/done", {
+                      role: "user",
+                      text: "Explore this idea.",
+                    }),
+                    emit("thread/realtime/transcript/done", {
+                      role: "assistant",
+                      text: "Let us explore it.",
+                    }),
+                    turn("first-voice-turn", false),
+                    turn("first-voice-turn", true),
+                    turn("second-voice-turn", false),
+                    {
+                      type: "emit_inbound",
+                      label: "voice-approval",
+                      frame: {
+                        id: 101,
+                        method: "item/commandExecution/requestApproval",
+                        params: {
+                          threadId: nativeThreadId,
+                          turnId: "second-voice-turn",
+                          itemId: "voice-command",
+                          command: "cat README.md",
+                          startedAtMs: 1782622441000,
+                        },
+                      },
+                    },
+                    {
+                      type: "expect_outbound",
+                      label: "voice-approval-answer",
+                      frame: { id: 101, result: { decision: "decline" } },
+                    },
+                    ...(stopAt === "between-turns" ? [turn("second-voice-turn", true)] : []),
+                    {
+                      type: "expect_outbound",
+                      label: "voice-stop",
+                      frame: {
+                        id: 7,
+                        method: "thread/realtime/stop",
+                        params: { threadId: nativeThreadId },
+                      },
+                    },
+                    { type: "emit_inbound", label: "voice-stop-ack", frame: { id: 7, result: {} } },
+                    emit("thread/realtime/closed", { reason: "requested" }),
+                    ...(stopAt === "during-turn" ? [turn("second-voice-turn", true)] : []),
+                  ] satisfies CodexReplay.CodexAppServerReplayEntry[])),
+          ],
+        });
+        const harness = yield* makeCodexReplayHarness(
+          transcript,
+          undefined,
+          undefined,
+          undefined,
+          (entry) =>
+            entry.label === "second-voice-turn-start" ? Deferred.await(releaseSecond) : Effect.void,
+        );
+        const turnInput = makeCodexTestTurnInput({
+          threadId: harness.threadId,
+          providerThread: harness.providerThread,
+          now: yield* DateTime.now,
+          attemptId: RunAttemptId.make("voice-attempt"),
+          text: "Voice brainstorming session",
+        });
+        const started = yield* harness.runtime
+          .startTurn({
+            ...turnInput,
+            runtimePolicy: { ...CODEX_TEST_RUNTIME_POLICY, runtimeMode: "approval-required" },
+            voice: {
+              sessionId: "voice-session",
+              sdp: "offer",
+              answer: (sdp) => Deferred.succeed(answer, sdp).pipe(Effect.asVoid),
+              installStop: (operation) => Deferred.succeed(stop, operation).pipe(Effect.asVoid),
+              fail: (reason) =>
+                Effect.sync(() => {
+                  failures.push(reason);
+                }),
+              closed: Effect.sync(() => {
+                closed++;
+              }),
+            },
+          })
+          .pipe(Effect.result);
+        if (stopAt === "rejected-start") {
+          yield* harness.until(() =>
+            harness.events.some(
+              (e) => e.type === "provider_turn.updated" && e.providerTurn.status === "failed",
+            ),
+          );
+          assert.equal(started._tag, "Failure");
+          assert.deepEqual(failures, ["connection"]);
+          assert.equal(closed, 0);
+          assert.equal(harness.terminalEvents().length, 0);
+          assert.isTrue(
+            harness.events.some(
+              (e) => e.type === "provider_turn.updated" && e.providerTurn.status === "failed",
+            ),
+          );
+          return;
+        }
+        assert.equal(started._tag, "Success");
+        if (stopAt === "async-error") {
+          yield* harness.firstTerminal;
+          assert.equal(harness.terminalEvents()[0]?.status, "failed");
+          assert.deepEqual(failures, ["connection"]);
+          return;
+        }
+        assert.equal(yield* Deferred.await(answer), "answer");
+        yield* harness.until(() =>
+          harness.events.some(
+            (e) =>
+              e.type === "provider_turn.updated" &&
+              e.providerTurn.nativeTurnRef?.nativeId === "first-voice-turn" &&
+              e.providerTurn.status === "completed",
+          ),
+        );
+        assert.equal(harness.terminalEvents().length, 0);
+        yield* Deferred.succeed(releaseSecond, undefined);
+        yield* harness.until(() =>
+          harness.events.some((e) => e.type === "runtime_request.updated"),
+        );
+        const request = harness.events.find((e) => e.type === "runtime_request.updated");
+        assert.equal(request?.type, "runtime_request.updated");
+        if (request?.type !== "runtime_request.updated") return;
+        yield* harness.runtime.respondToRuntimeRequest({
+          requestId: request.runtimeRequest.id,
+          decision: "decline",
+        });
+        if (stopAt === "between-turns")
+          yield* harness.until(() =>
+            harness.events.some(
+              (e) =>
+                e.type === "provider_turn.updated" &&
+                e.providerTurn.nativeTurnRef?.nativeId === "second-voice-turn" &&
+                e.providerTurn.status === "completed",
+            ),
+          );
+        assert.equal(harness.terminalEvents().length, 0);
+        yield* yield* Deferred.await(stop);
+        yield* harness.firstTerminal;
+        assert.equal(harness.terminalEvents().length, 1);
+        assert.equal(harness.terminalEvents()[0]?.status, "completed");
+        const nativeTurns = harness.events.filter(
+          (e) => e.type === "provider_turn.updated" && e.providerTurn.nativeTurnRef !== null,
+        );
+        assert.isTrue(
+          nativeTurns.every(
+            (e) =>
+              e.type === "provider_turn.updated" &&
+              e.providerTurn.runAttemptId === turnInput.attemptId &&
+              e.providerTurn.nodeId === turnInput.rootNodeId,
+          ),
+        );
+        assert.isTrue(
+          harness.events.some(
+            (e) =>
+              e.type === "message.updated" &&
+              e.message.role === "user" &&
+              e.message.text === "Explore this idea." &&
+              e.message.runId === turnInput.runId,
+          ),
+        );
+        assert.isTrue(
+          harness.events.some(
+            (e) =>
+              e.type === "message.updated" &&
+              e.message.role === "assistant" &&
+              e.message.text === "Let us explore it." &&
+              e.message.runId === turnInput.runId,
+          ),
+        );
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          Layer.mergeAll(
+            IdAllocator.layer,
+            McpProviderSessions.layer,
+            NodeServices.layer,
+            NodeCrypto.layer,
+          ),
+        ),
+      ),
+  );
+
+  it.effect("voice rejects API-key authentication before starting realtime", () =>
+    Effect.gen(function* () {
+      const nativeThreadId = "voice-apikey";
+      const failures: string[] = [];
+      const requested: string[] = [];
+      const harness = yield* makeCodexReplayHarness(
+        makeCodexReplayTranscript({
+          scenario: nativeThreadId,
+          entries: [
+            ...codexReplayPreamble({
+              nativeThreadId,
+              nativeTurnId: "unused",
+              prompt: "unused",
+            }).slice(0, 5),
+            {
+              type: "expect_outbound",
+              label: "account",
+              frame: { id: 3, method: "account/read", params: { refreshToken: false } },
+            },
+            {
+              type: "emit_inbound",
+              label: "account",
+              frame: { id: 3, result: { account: { type: "apiKey" }, requiresOpenaiAuth: true } },
+            },
+          ],
+        }),
+        undefined,
+        (method) =>
+          Effect.sync(() => {
+            requested.push(method);
+          }),
+      );
+      const result = yield* harness.runtime
+        .startTurn({
+          ...makeCodexTestTurnInput({
+            threadId: harness.threadId,
+            providerThread: harness.providerThread,
+            now: yield* DateTime.now,
+            attemptId: RunAttemptId.make("voice-apikey"),
+            text: "Voice brainstorming session",
+          }),
+          voice: {
+            sessionId: "voice-session",
+            sdp: "offer",
+            answer: () => Effect.void,
+            installStop: () => Effect.void,
+            fail: (reason) =>
+              Effect.sync(() => {
+                failures.push(reason);
+              }),
+            closed: Effect.void,
+          },
+        })
+        .pipe(Effect.result);
+      assert.equal(result._tag, "Failure");
+      assert.deepEqual(failures, ["subscription"]);
+      assert.isFalse(requested.includes("thread/realtime/start"));
+      assert.isFalse(requested.includes("turn/start"));
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(
+        Layer.mergeAll(
+          IdAllocator.layer,
+          McpProviderSessions.layer,
+          NodeServices.layer,
+          NodeCrypto.layer,
+        ),
+      ),
+    ),
+  );
+
   it.effect.each(["before", "after"] as const)(
     "rejects a previous run's native turn when it completes %s the new start response",
     (completionOrder) =>

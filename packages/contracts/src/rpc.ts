@@ -34,6 +34,15 @@ import {
   ChatGptHandoffState,
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
+import {
+  VoiceTarget,
+  VoiceStartInput,
+  VoiceSessionInput,
+  VoiceCapability,
+  VoiceStartResult,
+  VoiceState,
+  VoiceError,
+} from "./voice.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
@@ -434,6 +443,10 @@ export const WS_METHODS = {
   mcpAppsUpdateModelContext: "mcpApps.updateModelContext",
 
   providerUploadFeedback: "provider.uploadFeedback",
+  voiceCapability: "voice.capability",
+  voiceStart: "voice.start",
+  voiceStop: "voice.stop",
+  voiceState: "voice.state",
   providerAuthStart: "provider.auth.start",
   providerConsumeResetCredit: "provider.consumeResetCredit",
   providerAuthComplete: "provider.auth.complete",
@@ -672,6 +685,27 @@ const WsProviderConsumeResetCreditRpc = Rpc.make(WS_METHODS.providerConsumeReset
   payload: ProviderConsumeResetCreditInput,
   success: ProviderConsumeResetCreditResult,
   error: Schema.Union([ProviderSetupError, UsageLimitSourceError, EnvironmentAuthorizationError]),
+});
+
+const WsVoiceCapabilityRpc = Rpc.make(WS_METHODS.voiceCapability, {
+  payload: VoiceTarget,
+  success: VoiceCapability,
+  error: VoiceError,
+});
+const WsVoiceStartRpc = Rpc.make(WS_METHODS.voiceStart, {
+  payload: VoiceStartInput,
+  success: VoiceStartResult,
+  error: VoiceError,
+});
+const WsVoiceStopRpc = Rpc.make(WS_METHODS.voiceStop, {
+  payload: VoiceSessionInput,
+  success: Schema.Void,
+  error: VoiceError,
+});
+const WsVoiceStateRpc = Rpc.make(WS_METHODS.voiceState, {
+  payload: VoiceSessionInput,
+  success: VoiceState,
+  error: VoiceError,
 });
 
 const WsProviderAuthStartRpc = Rpc.make(WS_METHODS.providerAuthStart, {
@@ -1988,6 +2022,10 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 ) {}
 
 export const WsRpcGroup = RpcGroup.make(
+  WsVoiceCapabilityRpc,
+  WsVoiceStartRpc,
+  WsVoiceStopRpc,
+  WsVoiceStateRpc,
   WsGuestShareCreateRpc,
   WsServerProbeRpc,
   WsServerGetConfigRpc,

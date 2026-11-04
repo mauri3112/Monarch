@@ -20,6 +20,10 @@ it.effect("rejects an insecure runtime relay URL override", () =>
   ),
 );
 
+it.effect("requires an explicit hosted Monarch origin", () =>
+  hostedAppUrlConfig.pipe(provideEnv({}), Effect.flip),
+);
+
 it.effect("rejects malformed or insecure hosted app URLs", () =>
   Effect.gen(function* () {
     for (const value of [

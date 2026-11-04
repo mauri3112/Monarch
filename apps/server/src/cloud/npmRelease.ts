@@ -6,6 +6,7 @@ import {
 import { npmReleaseDatabaseMigration } from "@t3tools/shared/cliRelease";
 import { resolveCommandPath } from "@t3tools/shared/shell";
 import * as Cache from "effect/Cache";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -56,6 +57,7 @@ function toRelease(spec: string, json: string) {
 }
 
 export const make = Effect.fn("NpmRelease.make")(function* () {
+  const npmPackage = (yield* HostProcess.Environment).MONARCH_NPM_PACKAGE?.trim();
   const runner = yield* ProcessRunner.ProcessRunner;
   const http = yield* HttpClient.HttpClient;
   const lookupPublic = Effect.fn("NpmRelease.lookupPublic")(function* (spec: string) {
@@ -63,7 +65,9 @@ export const make = Effect.fn("NpmRelease.make")(function* () {
       reason: "npm is not installed and the public npm registry could not be reached.",
     });
     const json = yield* Effect.gen(function* () {
-      const response = yield* http.get(`https://registry.npmjs.org/t3/${spec}`);
+      const response = yield* http.get(
+        `https://registry.npmjs.org/${encodeURIComponent(npmPackage!)}/${spec}`,
+      );
       if (response.status === 404) return Option.none<string>();
       if (response.status < 200 || response.status >= 300) return yield* unreachable;
       return Option.some(yield* response.text);
@@ -87,7 +91,7 @@ export const make = Effect.fn("NpmRelease.make")(function* () {
           runner.run({
             command: npmPath,
             // Named fields keep the output small; the full package document grows with every release.
-            args: ["view", "--global", "--json", `t3@${spec}`, "version", "t3code"],
+            args: ["view", "--global", "--json", `${npmPackage}@${spec}`, "version", "t3code"],
             timeout: Duration.seconds(15),
             maxOutputBytes: 256 * 1024,
           }),
@@ -122,6 +126,12 @@ export const make = Effect.fn("NpmRelease.make")(function* () {
           () => new ServerNpmReleaseError({ reason: "Invalid release version or track." }),
         ),
       );
+      if (!npmPackage) {
+        return yield* new ServerNpmReleaseError({
+          reason:
+            "This Monarch source build has no npm update channel. Configure MONARCH_NPM_PACKAGE to use your own release package.",
+        });
+      }
       return yield* Cache.get(cache, spec);
     }),
   });

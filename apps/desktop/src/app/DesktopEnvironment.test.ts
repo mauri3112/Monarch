@@ -38,6 +38,20 @@ const makeEnvironment = (
 ) => DesktopEnvironment.DesktopEnvironment.pipe(Effect.provide(layerEnvironment(overrides, env)));
 
 describe("DesktopEnvironment", () => {
+  it.effect("ignores ambient T3 homes and honors explicit Monarch homes", () =>
+    Effect.gen(function* () {
+      const isolated = yield* makeEnvironment({}, { T3CODE_HOME: "/live/t3" });
+      assert.equal(isolated.baseDir, "/Users/alice/.monarch");
+      assert.equal(isolated.stateDir, "/Users/alice/.monarch/userdata");
+      const explicit = yield* makeEnvironment(
+        {},
+        { T3CODE_HOME: "/live/t3", MONARCH_HOME: "/custom/monarch" },
+      );
+      assert.equal(explicit.baseDir, "/custom/monarch");
+      assert.equal(explicit.stateDir, "/custom/monarch/userdata");
+    }),
+  );
+
   it.effect("uses the packaged Windows server sidecar as the backend root", () =>
     Effect.gen(function* () {
       const environment = yield* makeEnvironment({
@@ -68,8 +82,8 @@ describe("DesktopEnvironment", () => {
       );
       const production = yield* makeEnvironment();
 
-      assert.equal(development.stateDir, "/Users/alice/.t3/dev");
-      assert.equal(production.stateDir, "/Users/alice/.t3/userdata");
+      assert.equal(development.stateDir, "/Users/alice/.monarch/dev");
+      assert.equal(production.stateDir, "/Users/alice/.monarch/userdata");
     }),
   );
 });

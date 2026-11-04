@@ -1843,3 +1843,29 @@ for (const previousMessages of [[], ["/compact", " /COMPACT "]]) {
       }),
   );
 }
+
+effectIt.effect(
+  "fails a recovered voice admission without reopening audio or sending its marker as text",
+  () =>
+    Effect.gen(function* () {
+      const harness = makeLocalCommandHarness({
+        text: "Voice brainstorming session",
+        previousTurn: { runStatus: "completed", turnStatus: "completed" },
+      });
+      const projection = harness.projection();
+      harness.setProjection({
+        ...projection,
+        messages: projection.messages.map((message) => ({
+          ...message,
+          voiceSessionId: "lost-on-restart",
+        })),
+      });
+      yield* harness.start;
+      const controls = harness.startRootRun.mock.calls[0]?.[0];
+      expect(controls).toBeDefined();
+      if (!controls) return;
+      const failure = yield* controls.session.startTurn(controls as never).pipe(Effect.flip);
+      expect(failure._tag).toBe("ProviderAdapterTurnStartError");
+      expect(harness.startTurn).not.toHaveBeenCalled();
+    }),
+);

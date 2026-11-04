@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>com.mauri3112.monarch</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>MIT</project_license>
+  <name>Monarch</name>
+  <summary>Desktop GUI for coding agents</summary>
+  <developer id="com.mauri3112">
+    <name>Monarch contributors</name>
+  </developer>
+  <description>
+    <p>
+      Monarch is an open-source desktop app for coding agents. Work with your
+      existing agent subscriptions, review code changes, and run commands in
+      your projects.
+    </p>
+    <p>
+      Monarch is an independent source fork of T3 Code.
+    </p>
+  </description>
+  <launchable type="desktop-id">monarch.desktop</launchable>
+  <icon type="stock">monarch</icon>
+  <provides>
+    <binary>monarch</binary>
+  </provides>
+  <categories>
+    <category>Development</category>
+  </categories>
+  <url type="homepage">https://github.com/mauri3112/Monarch</url>
+  <url type="bugtracker">https://github.com/mauri3112/Monarch/issues</url>
+  <url type="vcs-browser">https://github.com/mauri3112/Monarch</url>
+</component>

@@ -34,9 +34,11 @@ import {
 export function ThreadRouteView({
   target,
   background = false,
+  contained = false,
 }: {
   target: ThreadRouteTarget;
   background?: boolean;
+  contained?: boolean;
 }) {
   const navigate = useNavigate();
   const draftId = target.kind === "draft" ? target.draftId : null;
@@ -147,6 +149,7 @@ export function ThreadRouteView({
     } else if (draftSession) {
       view = (
         <ChatView
+          contained={contained}
           key={target.draftId}
           draftId={target.draftId}
           environmentId={draftSession.environmentId}
@@ -171,6 +174,7 @@ export function ThreadRouteView({
       // Same slot and key as the server route renders, so the swap keeps this instance.
       view = (
         <ChatView
+          contained={contained}
           key={target.draftId}
           environmentId={draftRedirect.environmentId}
           threadId={draftRedirect.threadId}
@@ -195,6 +199,7 @@ export function ThreadRouteView({
   } else if (renderState === "ready" || (renderState === "loading" && serverThreadShell !== null)) {
     view = (
       <ChatView
+        contained={contained}
         key={nextHandoffKey?.key}
         environmentId={target.threadRef.environmentId}
         threadId={target.threadRef.threadId}
@@ -205,7 +210,11 @@ export function ThreadRouteView({
 
   return (
     <SidebarInset
-      className="h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
+      className={
+        contained
+          ? "min-h-0 overflow-hidden overscroll-y-none"
+          : "h-svh min-h-0 overflow-hidden overscroll-y-none md:h-dvh"
+      }
       inert={background}
     >
       <BackgroundThreadContext value={background}>{view}</BackgroundThreadContext>

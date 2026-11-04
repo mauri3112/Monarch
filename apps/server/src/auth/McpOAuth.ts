@@ -82,7 +82,7 @@ export const protectedResourceMetadata = (
   authorization_servers: [urls.issuer],
   scopes_supported: MCP_OAUTH_SCOPES,
   bearer_methods_supported: ["header"],
-  resource_name: "T3 Code",
+  resource_name: "Monarch",
 });
 
 export const authorizationServerMetadata = (
@@ -581,9 +581,10 @@ export const layerMcpClientAuthenticator = Layer.effect(
     const environmentId = yield* environment.getEnvironmentId;
     const hostedAppUrl = yield* hostedAppUrlConfig.pipe(
       Effect.catch((cause) =>
-        Effect.logWarning("Outside MCP clients get app.t3.codes thread links", { cause }).pipe(
-          Effect.as(DEFAULT_HOSTED_APP_URL),
-        ),
+        Effect.logDebug(
+          "No hosted Monarch client configured; external MCP clients use Monarch desktop links",
+          { cause },
+        ).pipe(Effect.as(DEFAULT_HOSTED_APP_URL)),
       ),
     );
     return McpHttpServer.McpClientAuthenticator.of({

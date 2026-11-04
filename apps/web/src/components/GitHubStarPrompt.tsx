@@ -10,8 +10,8 @@ import { sourceControlEnvironment } from "../state/sourceControl";
 import { toastManager } from "./ui/toast";
 
 // Separate keys so a count written by another tab can never undo a dismissal.
-const SENT_KEY = "t3code:github-star-prompt:sent";
-const DISMISSED_KEY = "t3code:github-star-prompt:dismissed";
+const SENT_KEY = "monarch:github-star-prompt:sent";
+const DISMISSED_KEY = "monarch:github-star-prompt:dismissed";
 const REPOSITORY = "pingdotgg/t3code";
 const PROMPTS_BEFORE_ASKING = 5;
 const IDLE_MS = 30_000;

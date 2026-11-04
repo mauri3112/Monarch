@@ -1,6 +1,10 @@
 import { DEFAULT_HOSTED_APP_URL } from "@t3tools/shared/connectAuth";
 
-import { getPairingTokenFromUrl, setPairingTokenOnUrl } from "@t3tools/shared/remote";
+import {
+  getPairingTokenFromUrl,
+  resolveRemotePairingTarget,
+  setPairingTokenOnUrl,
+} from "@t3tools/shared/remote";
 
 export interface HostedPairingRequest {
   readonly host: string;
@@ -73,7 +77,12 @@ export function buildHostedPairingUrl(input: {
   readonly token: string;
   readonly label?: string | null;
 }): string {
-  const url = new URL("/pair", configuredHostedAppUrl());
+  const hostedAppUrl = configuredHostedAppUrl();
+  if (!hostedAppUrl) {
+    const target = resolveRemotePairingTarget({ host: input.host, pairingCode: input.token });
+    return setPairingTokenOnUrl(new URL("/pair", target.httpBaseUrl), target.credential).toString();
+  }
+  const url = new URL("/pair", hostedAppUrl);
   url.searchParams.set("host", input.host);
 
   const label = input.label?.trim();
@@ -87,7 +96,13 @@ export function buildHostedPairingUrl(input: {
 export function buildHostedChannelSelectionUrl(input: {
   readonly channel: HostedAppChannel;
 }): string {
-  const url = new URL("/__t3code/channel", configuredHostedAppUrl());
+  const hostedAppUrl = configuredHostedAppUrl();
+  if (!hostedAppUrl) {
+    throw new Error(
+      "Hosted release channels are unavailable. Configure VITE_HOSTED_APP_URL to enable them.",
+    );
+  }
+  const url = new URL("/__t3code/channel", hostedAppUrl);
   url.searchParams.set("channel", input.channel);
   return url.toString();
 }

@@ -426,3 +426,27 @@ it.effect("sends a guest message with the guest's files, never ones the client n
     expect(command.attachments).toEqual([guestFile]);
   }).pipe(Effect.provide(layerIntakeTest)),
 );
+
+it.effect("strips a forged voice admission marker from public messages", () =>
+  Effect.gen(function* () {
+    const captured: OrchestrationV2ServerCommand[] = [];
+    yield* dispatchCommand({
+      type: "message.dispatch",
+      commandId: CommandId.make("forged-voice"),
+      threadId: ThreadId.make("voice-thread"),
+      messageId: MessageId.make("voice-message"),
+      voiceSessionId: "another-owner-session",
+      text: "Voice brainstorming session",
+      attachments: [],
+      dispatchMode: { type: "start_immediately" },
+      createdBy: "user",
+      creationSource: "web",
+    }).pipe(Effect.provide(layerFailingDispatch(captured)), Effect.result);
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).not.toHaveProperty("voiceSessionId", "another-owner-session");
+    expect(captured[0]).toMatchObject({
+      type: "message.dispatch",
+      text: "Voice brainstorming session",
+    });
+  }).pipe(Effect.provide(layerIntakeTest)),
+);

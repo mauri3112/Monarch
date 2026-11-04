@@ -2,8 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   buildHostedPairingUrl,
+  buildHostedChannelSelectionUrl,
   hasHostedPairingRequest,
   readHostedPairingRequest,
+  isHostedStaticApp,
 } from "./hostedPairing";
 
 describe("hostedPairing", () => {
@@ -39,5 +41,35 @@ describe("hostedPairing", () => {
     expect(url.searchParams.get("label")).toBe("Workstation");
     expect(url.searchParams.has("token")).toBe(false);
     expect(url.hash).toBe("#token=pairing-token");
+  });
+
+  it.each([
+    ["https://workstation.example:3773", "https://workstation.example:3773"],
+    ["http://127.0.0.1:3773", "http://127.0.0.1:3773"],
+    ["wss://workstation.example:3773/ws", "https://workstation.example:3773"],
+    ["workstation.example:3773", "https://workstation.example:3773"],
+  ])("pairs directly with %s when no hosted application is configured", (host, origin) => {
+    vi.stubEnv("VITE_HOSTED_APP_URL", "");
+    const url = new URL(buildHostedPairingUrl({ host, token: "private-token" }));
+    expect(url.origin).toBe(origin);
+    expect(url.pathname).toBe("/pair");
+    expect(url.search).toBe("");
+    expect(url.hash).toBe("#token=private-token");
+    expect(hasHostedPairingRequest(url)).toBe(false);
+  });
+
+  it("does not offer an upstream hosted channel without an explicitly configured app", () => {
+    vi.stubEnv("VITE_HOSTED_APP_URL", "");
+    vi.stubEnv("VITE_HOSTED_APP_CHANNEL", "");
+    vi.stubEnv("VITE_HTTP_URL", "");
+    vi.stubEnv("VITE_WS_URL", "");
+    expect(isHostedStaticApp(new URL("https://app.t3.codes"))).toBe(false);
+    expect(() => buildHostedChannelSelectionUrl({ channel: "nightly" })).toThrow(
+      "Hosted release channels are unavailable",
+    );
+    vi.stubEnv("VITE_HOSTED_APP_URL", "https://monarch.example");
+    expect(buildHostedChannelSelectionUrl({ channel: "nightly" })).toBe(
+      "https://monarch.example/__t3code/channel?channel=nightly",
+    );
   });
 });

@@ -1,0 +1,97 @@
+name: Monarch CI
+
+on:
+  push:
+    branches: [main, codex/monarch-mvp]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: monarch-ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source:
+    if: github.repository == 'mauri3112/Monarch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MONARCH_TELEMETRY_ENABLED: "false"
+      MONARCH_DEV_SEED: "false"
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            /*
+            !/.repos/
+            !/apps/mobile/modules/t3-terminal/Vendor/**/*.a
+          sparse-checkout-cone-mode: false
+      - name: Install dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --frozen-lockfile --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/web... --filter=@t3tools/scripts...
+      - name: Install browser test runtime
+        run: node apps/web/node_modules/playwright/cli.js install --with-deps --only-shell chromium
+      - name: Check shared identity and release defaults
+        working-directory: packages/shared
+        run: >-
+          vp test run --config ../../vite.config.ts
+          src/cliRelease.test.ts src/devHome.test.ts src/desktopAppControl.test.ts
+          src/promptLinks.test.ts src/providerAuthReturnUrl.test.ts src/otelEnvironment.test.ts
+      - name: Check desktop profile and launcher isolation
+        working-directory: apps/desktop
+        run: >-
+          vp test run src/app/DesktopUserData.test.ts src/app/DesktopEnvironment.test.ts
+          src/app/DesktopCliShim.test.ts src/app/DesktopCliCommand.test.ts
+          src/app/DesktopAppIdentity.test.ts src/app/DesktopStartupRecovery.test.ts
+          src/app/DesktopClerk.test.ts src/app/DesktopLifecycle.test.ts
+          src/app/DesktopLinuxUrlHandler.test.ts
+          src/snapShot/GnomeCaptureSetup.test.ts src/snapShot/snapShot.test.ts
+          src/ipc/methods/window.test.ts
+      - name: Check development and installer isolation
+        working-directory: scripts
+        run: >-
+          vp test run --config ../vite.config.ts
+          dev-runner.test.ts install.test.ts build-npm-launcher.test.ts
+      - name: Check remote cache opt-in
+        working-directory: infra/task-cache
+        run: vp test run --config ../../vite.config.ts src/remoteCache.test.ts
+      - name: Check packaging identity and disabled feeds
+        working-directory: scripts
+        run: vp test run --config ../vite.config.ts build-desktop-artifact.test.ts -t 'update feeds|passkey signing|entitlements|product name|WSL|embedded archive|Linux CLI archive'
+      - name: Check server authorization and voice
+        working-directory: apps/server
+        run: >-
+          vp test run src/telemetry/AnalyticsService.test.ts src/provider/ModelManifest.test.ts
+          src/orchestration-v2/VoiceSessions.test.ts src/orchestration-v2/VoiceSessionService.test.ts
+          src/auth/RpcAuthorization.test.ts
+          src/cloud/npmRelease.test.ts src/cli/invocation.test.ts src/cloud/bootService.test.ts
+          src/device/sshDeviceScript.test.ts
+          scripts/migrate-dev-db.test.ts
+      - name: Check Codex voice adapter lifecycle
+        working-directory: apps/server
+        run: >-
+          vp test run src/orchestration-v2/Adapters/CodexAdapterV2.test.ts
+          src/orchestration-v2/ProviderTurnStartService.test.ts
+          src/orchestration-v2/ThreadMessageIntake.test.ts -t voice
+      - name: Check client permissions
+        working-directory: packages/client-runtime
+        run: vp test run src/state/commandPermissions.test.ts
+      - name: Check project workspace and voice client
+        working-directory: apps/web
+        run: >-
+          vp test run src/monarch src/hooks/useElementWidthBelow.browser.test.tsx
+          src/threadRoutes.test.ts src/browserPersistenceIsolation.browser.test.ts
+      - name: Typecheck changed runtime packages
+        run: >-
+          vp run --filter @t3tools/contracts --filter @t3tools/shared
+          --filter @t3tools/provider-core --filter effect-codex-app-server
+          --filter @t3tools/client-runtime --filter @t3tools/web
+          --filter t3 --filter @t3tools/desktop --filter @t3tools/scripts typecheck
+      - name: Build web client
+        run: vp run --filter @t3tools/web build
+      - name: Build server bundle
+        run: vp run --filter t3 build:bundle

@@ -1,8 +1,27 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { cliArchiveTarCommand, newestCliReleaseVersion, parseChecksums } from "./cliRelease.ts";
+import {
+  CLI_RELEASE_BASE_URL_ENV,
+  CLI_RELEASES_PAGE_URL,
+  cliReleaseAssetUrl,
+  cliReleaseIndexPageUrl,
+  cliArchiveTarCommand,
+  newestCliReleaseVersion,
+  parseChecksums,
+} from "./cliRelease.ts";
 
 describe("cliRelease", () => {
+  it("uses only Monarch release endpoints by default", () => {
+    expect(CLI_RELEASE_BASE_URL_ENV).toBe("MONARCH_RELEASE_BASE_URL");
+    expect(CLI_RELEASES_PAGE_URL).toBe("https://github.com/mauri3112/Monarch/releases");
+    expect(cliReleaseIndexPageUrl(1)).toBe(
+      "https://api.github.com/repos/mauri3112/Monarch/releases?per_page=100&page=1",
+    );
+    expect(cliReleaseAssetUrl("1.2.3", "SHA256SUMS")).toBe(
+      "https://github.com/mauri3112/Monarch/releases/download/v1.2.3/SHA256SUMS",
+    );
+  });
+
   it("parses sha256sum output including binary-mode markers", () => {
     const checksums = parseChecksums(
       [

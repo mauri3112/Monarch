@@ -6156,6 +6156,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         completedAt: null,
       };
       const message: OrchestrationV2ConversationMessage = {
+        ...(command.voiceSessionId === undefined ? {} : { voiceSessionId: command.voiceSessionId }),
         createdBy: command.createdBy,
         creationSource: command.creationSource,
         ...(command.scheduledTaskId === undefined
@@ -6522,6 +6523,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         completedAt: null,
       };
       const message: OrchestrationV2ConversationMessage = {
+        ...(command.voiceSessionId === undefined ? {} : { voiceSessionId: command.voiceSessionId }),
         createdBy: command.createdBy,
         creationSource: command.creationSource,
         ...(command.scheduledTaskId === undefined
@@ -7274,6 +7276,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       completedAt: null,
     };
     const message: OrchestrationV2ConversationMessage = {
+      ...(command.voiceSessionId === undefined ? {} : { voiceSessionId: command.voiceSessionId }),
       createdBy: command.createdBy,
       creationSource: command.creationSource,
       ...(command.scheduledTaskId === undefined

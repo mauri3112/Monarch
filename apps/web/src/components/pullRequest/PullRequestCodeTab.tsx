@@ -137,7 +137,7 @@ type ReviewAnnotation = DiffLineAnnotation<ReviewAnnotationGroup>;
 
 const COMMIT_PAGE_SIZE = 10;
 
-const PULL_REQUEST_FILE_TREE_STORAGE_KEY = "t3code.pullRequestFileTreeOpen";
+const PULL_REQUEST_FILE_TREE_STORAGE_KEY = "monarch:pullRequestFileTreeOpen";
 
 interface DiffSlice {
   readonly source: PullRequestDiffResult;
@@ -1560,7 +1560,7 @@ function PullRequestCodeTab({
         {fileTreeOpen ? (
           <FileExplorerPane
             resizable
-            storageKey="t3code:diff-file-tree-width"
+            storageKey="monarch:diff-file-tree-width"
             defaultWidth={320}
             defaultWidthFraction={0.4}
             minWidth={192}

@@ -20,9 +20,7 @@ jobs:
   label:
     name: Sync native change label
     # A cancelled run was superseded by a newer push, whose run labels instead.
-    if: >-
-      github.event.workflow_run.event == 'pull_request' &&
-      github.event.workflow_run.conclusion == 'success'
+    if: ${{ github.repository == 'pingdotgg/t3code' && (github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion == 'success') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 5
     permissions:

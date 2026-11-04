@@ -87,7 +87,13 @@ describe("resolveStartupRecoveryOffer", () => {
     ).toEqual({ _tag: "ManagedPolicy" });
   });
 
-  it("falls back to the releases page when this version never started", () => {
+  it("offers source setup when updates are disabled or this version never started", () => {
+    expect(
+      resolveStartupRecoveryOffer(
+        updateState({ enabled: false, status: "downloaded", downloadedVersion: "0.1.4" }),
+        "0.1.2",
+      ),
+    ).toEqual({ _tag: "Releases" });
     expect(resolveStartupRecoveryOffer(updateState({ status: "disabled" }), "0.1.3")).toEqual({
       _tag: "Releases",
     });

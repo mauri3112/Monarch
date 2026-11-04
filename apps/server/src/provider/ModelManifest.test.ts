@@ -3,6 +3,7 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { ProviderDriverKind } from "@t3tools/contracts";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 import * as Effect from "effect/Effect";
+import * as ConfigProvider from "effect/ConfigProvider";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
@@ -247,24 +248,77 @@ const INVALID_REMOTE_MANIFESTS: ReadonlyArray<ModelManifest.ModelManifestData> =
   }),
 ];
 
-const layerHttpClient = (handler: () => Response) =>
+const layerHttpClient = (handler: (url: string) => Response) =>
   Layer.succeed(
     HttpClient.HttpClient,
-    HttpClient.make((request) => Effect.succeed(HttpClientResponse.fromWeb(request, handler()))),
+    HttpClient.make((request) =>
+      Effect.succeed(HttpClientResponse.fromWeb(request, handler(request.url))),
+    ),
   );
 
 const layerService = (input: {
   readonly prefix: string;
-  readonly response: () => Response;
+  readonly response: (url: string) => Response;
   readonly settings?: Parameters<typeof ServerSettings.layerTest>[0];
+  readonly manifestUrl?: string;
 }) =>
   ServerConfig.layerTest(process.cwd(), { prefix: input.prefix }).pipe(
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(ServerSettings.layerTest(input.settings ?? {})),
     Layer.provideMerge(layerHttpClient(input.response)),
+    Layer.provideMerge(
+      ConfigProvider.layer(
+        ConfigProvider.fromEnv({
+          env: {
+            MONARCH_MODEL_MANIFEST_URL:
+              input.manifestUrl ?? "https://manifest.example.test/models.json",
+          },
+        }),
+      ),
+    ),
   );
 
 describe("ModelManifest service", () => {
+  it.live(
+    "uses only the bundle without an explicit endpoint, ignoring an existing remote cache",
+    () => {
+      let fetchCount = 0;
+      return Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const config = yield* ServerConfig.ServerConfig;
+        yield* fs.writeFileString(
+          path.join(config.stateDir, "model-manifest.json"),
+          yield* ModelManifest.encodeManifestCache({
+            fetchedAtMs: 0,
+            manifest: REMOTE_MANIFEST,
+          }),
+        );
+        for (const env of [{}, { MONARCH_MODEL_MANIFEST_URL: "  " }]) {
+          const service = yield* ModelManifest.make.pipe(
+            Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env }))),
+          );
+          assert.deepStrictEqual(yield* service.current, ModelManifest.BUNDLED_MODEL_MANIFEST);
+          assert.deepStrictEqual(yield* service.refresh, ModelManifest.BUNDLED_MODEL_MANIFEST);
+          assert.deepStrictEqual(yield* service.forceRefresh, ModelManifest.BUNDLED_MODEL_MANIFEST);
+          yield* service.refreshInBackground;
+        }
+        assert.strictEqual(fetchCount, 0);
+      }).pipe(
+        Effect.scoped,
+        Effect.provide(
+          layerService({
+            prefix: "model-manifest-bundled-default-test",
+            response: () => {
+              fetchCount += 1;
+              return Response.json(REMOTE_MANIFEST);
+            },
+          }),
+        ),
+      );
+    },
+  );
+
   it.live("prefers a fetched manifest over the bundle and caches it to disk", () =>
     Effect.gen(function* () {
       const service = yield* ModelManifest.make;
@@ -278,7 +332,11 @@ describe("ModelManifest service", () => {
       Effect.provide(
         layerService({
           prefix: "model-manifest-fetch-test",
-          response: () => Response.json(REMOTE_MANIFEST),
+          manifestUrl: " https://operator.example.test/reviewed-models.json ",
+          response: (url) => {
+            assert.strictEqual(url, "https://operator.example.test/reviewed-models.json");
+            return Response.json(REMOTE_MANIFEST);
+          },
         }),
       ),
     ),

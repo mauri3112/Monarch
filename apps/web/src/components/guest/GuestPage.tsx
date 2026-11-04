@@ -81,7 +81,7 @@ interface GuestEntry {
 let capturedEntry: GuestEntry | null = null;
 
 // A reload keeps the tab's session, so it keeps which messages still wait for a row too.
-const AWAITING_ROWS_KEY = "t3:guest-awaiting-rows";
+const AWAITING_ROWS_KEY = "monarch:guest-awaiting-rows";
 const AWAITING_ROWS_LIMIT = 50;
 
 function readAwaitingRowIds(): ReadonlySet<GuestMessageId> {

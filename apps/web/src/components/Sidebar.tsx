@@ -328,9 +328,9 @@ const EMPTY_THREADS: readonly EnvironmentThreadShell[] = [];
 
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
-const SETTLED_SHELF_EXPANDED_KEY = "t3code:sidebar:settled-expanded";
-const SNOOZED_SHELF_EXPANDED_KEY = "t3code:sidebar:snoozed-expanded";
-const WORKING_SHELF_EXPANDED_KEY = "t3code:sidebar:working-expanded";
+const SETTLED_SHELF_EXPANDED_KEY = "monarch:sidebar:settled-expanded";
+const SNOOZED_SHELF_EXPANDED_KEY = "monarch:sidebar:snoozed-expanded";
+const WORKING_SHELF_EXPANDED_KEY = "monarch:sidebar:working-expanded";
 
 const inboxReturns = createInboxReturnTracker();
 

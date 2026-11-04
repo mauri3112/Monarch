@@ -465,7 +465,17 @@ export interface ProviderAdapterV2EnsureThreadInput {
   readonly forceNewNativeThread?: boolean;
 }
 
+export interface ProviderVoiceConnection {
+  readonly sessionId: string;
+  readonly sdp: string;
+  readonly answer: (sdp: string) => Effect.Effect<void>;
+  readonly fail: (reason: "subscription" | "unsupported" | "connection") => Effect.Effect<void>;
+  readonly closed: Effect.Effect<void>;
+  readonly installStop: (stop: Effect.Effect<void>) => Effect.Effect<void>;
+}
+
 export interface ProviderAdapterV2TurnInput {
+  readonly voice?: ProviderVoiceConnection;
   readonly appThread: OrchestrationV2AppThread;
   readonly threadId: ThreadId;
   readonly runId: RunId;

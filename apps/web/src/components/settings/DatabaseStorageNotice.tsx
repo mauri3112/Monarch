@@ -22,7 +22,7 @@ export function DatabaseStorageNotice({
     ),
   );
   const [dismissed, setDismissed] = useLocalStorage(
-    "database-storage-notice-dismissed",
+    "monarch:database-storage-notice-dismissed",
     [],
     DismissedEnvironmentIds,
   );
