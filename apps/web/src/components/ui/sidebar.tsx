@@ -23,7 +23,7 @@ import { resolveSidebarState, type ResponsiveSidebarState } from "./sidebarState
 import * as Schema from "effect/Schema";
 import { announceSidebarVisibility } from "~/lib/accessibilityAnnouncements";
 
-const SIDEBAR_COOKIE_NAME = "monarch:sidebar_state";
+const SIDEBAR_COOKIE_NAME = "monarch_sidebar_state";
 const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
