@@ -11,7 +11,36 @@ vi.mock("../components/ThreadRouteView", () => ({
   ThreadRouteView: () => <textarea aria-label="Conversation composer" defaultValue="" />,
 }));
 
-vi.mock("./ProjectBoard", () => ({ ProjectBoard: () => <div>Project threads</div> }));
+vi.mock("./ProjectBoard", async () => {
+  const { createPortal } = await import("react-dom");
+  const { useMonarchDock } = await import("./MonarchDockContext");
+  return {
+    ProjectBoard: () => {
+      const dock = useMonarchDock();
+      return (
+        <div>
+          Project threads
+          <button onClick={() => dock?.open("context")}>Open project context</button>
+          <button onClick={() => dock?.open("included", "main")}>Open included context</button>
+          {dock?.activeKind === "context" && dock.host
+            ? createPortal(
+                <div>
+                  <textarea aria-label="Project notes" defaultValue="" />
+                  <button onClick={dock.close}>Close project context</button>
+                </div>,
+                dock.host,
+              )
+            : null}
+        </div>
+      );
+    },
+  };
+});
+
+vi.mock("./ProjectContextIncludedNotice", () => ({
+  ProjectContextIncludedNotice: ({ panelOnly }: { panelOnly?: boolean }) =>
+    panelOnly ? <div>Included context panel</div> : null,
+}));
 
 vi.mock("../state/entities", () => ({
   useProject: () => ({ id: "project", environmentId: "environment", title: "Example project" }),
@@ -50,4 +79,17 @@ it("keeps the conversation mounted through pane expansion, draft promotion, and 
   await expect
     .element(screen.getByRole("link", { name: "Close thread pane" }))
     .toHaveAttribute("href", "/workspace/environment/project");
+
+  await userEvent.click(screen.getByRole("button", { name: "Open project context" }));
+  const notes = screen.getByRole("textbox", { name: "Project notes" });
+  await userEvent.fill(notes, "Keep this context edit");
+  await screen.rerender(<MonarchWorkspace target={null} projectRef={projectRef} />);
+  await expect.element(notes).toHaveValue("Keep this context edit");
+  await screen.rerender(<MonarchWorkspace target={threadTarget} projectRef={projectRef} />);
+  await expect.element(notes).toHaveValue("Keep this context edit");
+  await userEvent.click(screen.getByRole("button", { name: "Close project context" }));
+  await userEvent.click(screen.getByRole("button", { name: "Open included context" }));
+  await expect.element(screen.getByText("Included context panel")).toBeVisible();
+  await screen.rerender(<MonarchWorkspace target={null} projectRef={projectRef} />);
+  await expect.element(screen.getByText("Included context panel")).not.toBeInTheDocument();
 });

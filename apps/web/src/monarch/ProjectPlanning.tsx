@@ -20,6 +20,7 @@ import {
   XIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "@tanstack/react-router";
 
 import { Button } from "../components/ui/button";
@@ -34,6 +35,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { usePrepareSuggestionDraft } from "./usePrepareSuggestionDraft";
 import { ProjectSchedules } from "./ProjectSchedules";
 import { SuggestionSettingsPanel } from "./SuggestionSettingsPanel";
+import { useMonarchDock } from "./MonarchDockContext";
 
 const STATUS_LABEL: Record<MonarchTargetStatus, string> = {
   draft: "Draft",
@@ -98,6 +100,7 @@ export function ProjectPlanning({
   const [editingTarget, setEditingTarget] = useState<MonarchTarget | "new" | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<NextThreadSuggestion | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const dock = useMonarchDock();
   const [scheduleEditor, setScheduleEditor] = useState<MonarchReviewSchedule | "new" | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -409,7 +412,11 @@ export function ProjectPlanning({
                   : " Automatic updates are off."}
             </p>
           </div>
-          <Button size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => (dock ? dock.open("settings") : setSettingsOpen(true))}
+          >
             <Settings2Icon /> Settings
           </Button>
         </div>
@@ -622,23 +629,27 @@ export function ProjectPlanning({
         suggestionEditor={scheduleEditor}
         onSuggestionEditorChange={setScheduleEditor}
       />
-      {settingsOpen ? (
+      {dock?.activeKind === "settings" && dock.host
+        ? createPortal(
+            <SuggestionSettingsPanel
+              key={`${projectRef.environmentId}:${projectRef.projectId}`}
+              projectRef={projectRef}
+              projectTitle={projectTitle}
+              open
+              onClose={dock.close}
+              archived={archived}
+              presentation="docked"
+            />,
+            dock.host,
+          )
+        : null}
+      {!dock && settingsOpen ? (
         <SuggestionSettingsPanel
           key={`${projectRef.environmentId}:${projectRef.projectId}`}
           projectRef={projectRef}
           projectTitle={projectTitle}
           open
           onClose={() => setSettingsOpen(false)}
-          onManageSchedule={(schedule) => {
-            setScheduleEditor(schedule);
-            setSettingsOpen(false);
-            requestAnimationFrame(() =>
-              document.getElementById("monarch-schedules-heading")?.scrollIntoView({
-                behavior: "smooth",
-                block: "start",
-              }),
-            );
-          }}
           archived={archived}
         />
       ) : null}

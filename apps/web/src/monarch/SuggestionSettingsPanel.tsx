@@ -17,13 +17,6 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import { ProviderModelPicker } from "../components/chat/ProviderModelPicker";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import {
-  Sheet,
-  SheetDescription,
-  SheetHeader,
-  SheetPopup,
-  SheetTitle,
-} from "../components/ui/sheet";
 import { Switch } from "../components/ui/switch";
 import { Textarea } from "../components/ui/textarea";
 import { useEnvironmentSettings } from "../hooks/useSettings";
@@ -33,6 +26,8 @@ import { monarchEnvironment } from "../state/monarch";
 import { useEnvironmentQuery } from "../state/query";
 import { EMPTY_SERVER_PROVIDERS, serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
+import { MonarchPanelShell } from "./MonarchPanelShell";
+import { ProjectReviewSchedules } from "./ProjectReviewSchedules";
 
 const REVIEW_DRIVERS = new Set<string>(MONARCH_REVIEW_DRIVER_KINDS);
 const REASON_LABEL = {
@@ -57,15 +52,15 @@ export function SuggestionSettingsPanel({
   projectTitle,
   open,
   onClose,
-  onManageSchedule,
   archived,
+  presentation,
 }: {
   projectRef: ScopedProjectRef;
   projectTitle: string;
   open: boolean;
   onClose: () => void;
-  onManageSchedule: (schedule: MonarchReviewSchedule | "new") => void;
   archived: boolean;
+  presentation?: "sheet" | "docked";
 }) {
   const stateQuery = useEnvironmentQuery(
     monarchEnvironment.context.live({
@@ -90,12 +85,6 @@ export function SuggestionSettingsPanel({
   useEffect(() => {
     if (open) refreshSources();
   }, [open, refreshSources]);
-  const schedulesQuery = useEnvironmentQuery(
-    monarchEnvironment.schedules.live({
-      environmentId: projectRef.environmentId,
-      input: { projectId: projectRef.projectId },
-    }),
-  );
   const canEdit =
     useAtomValue(
       monarchEnvironment.context.updateSettings.permissionAtom(projectRef.environmentId),
@@ -113,6 +102,7 @@ export function SuggestionSettingsPanel({
     label: "refresh project suggestions",
   });
   const [busy, setBusy] = useState<"save" | "refresh" | "retry" | null>(null);
+  const [scheduleEditor, setScheduleEditor] = useState<MonarchReviewSchedule | "new" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const state = stateQuery.data;
@@ -134,7 +124,6 @@ export function SuggestionSettingsPanel({
     activity?.blockedReason === "failed" ||
     activity?.runs[0]?.status === "failed" ||
     activity?.runs[0]?.status === "interrupted";
-  const schedules = schedulesQuery.data?.schedules ?? [];
 
   async function save(settings: MonarchContextSettings) {
     if (!state) return;
@@ -176,158 +165,130 @@ export function SuggestionSettingsPanel({
   }
 
   return (
-    <Sheet
+    <MonarchPanelShell
+      title="Suggestion settings"
+      description={
+        <>
+          {projectTitle} · Only this environment and project. Background updates maintain context
+          and suggest next threads; they do not start work.
+        </>
+      }
+      presentation={presentation}
       open={open}
-      onOpenChange={(value) => {
-        if (!value) onClose();
-      }}
+      onClose={onClose}
     >
-      <SheetPopup className="w-[min(100vw,34rem)] max-w-[34rem]" side="right" layer="dialog">
-        <SheetHeader>
-          <SheetTitle>Suggestion settings</SheetTitle>
-          <SheetDescription>
-            {projectTitle} · Only this environment and project. Background updates maintain context
-            and suggest next threads; they do not start work.
-          </SheetDescription>
-        </SheetHeader>
-        <div className="min-h-0 overflow-y-auto px-5 py-5 sm:px-6">
-          {stateQuery.error ? (
-            <p role="alert" className="text-xs text-destructive">
-              Could not load settings: {stateQuery.error}{" "}
-              <Button size="xs" variant="ghost" onClick={stateQuery.refresh}>
-                Retry
-              </Button>
-            </p>
-          ) : null}
-          {activityQuery.error ? (
-            <p role="alert" className="text-xs text-destructive">
-              Could not load activity: {activityQuery.error}{" "}
-              <Button size="xs" variant="ghost" onClick={activityQuery.refresh}>
-                Retry
-              </Button>
-            </p>
-          ) : null}
-          {error ? (
-            <p role="alert" className="text-xs text-destructive">
-              {error}{" "}
-              <Button size="xs" variant="ghost" onClick={stateQuery.refresh}>
-                Reload
-              </Button>
-            </p>
-          ) : null}
-          {notice ? (
-            <p role="status" className="text-xs text-muted-foreground">
-              {notice}
-            </p>
-          ) : null}
-          {stateQuery.isPending && !state ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              Loading suggestion settings…
-            </p>
-          ) : null}
-          {state ? (
-            <div className="space-y-7">
-              <SettingsForm
-                key={`${projectRef.environmentId}:${projectRef.projectId}:${state.settingsRevision}`}
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+        {stateQuery.error ? (
+          <p role="alert" className="text-xs text-destructive">
+            Could not load settings: {stateQuery.error}{" "}
+            <Button size="xs" variant="ghost" onClick={stateQuery.refresh}>
+              Retry
+            </Button>
+          </p>
+        ) : null}
+        {activityQuery.error ? (
+          <p role="alert" className="text-xs text-destructive">
+            Could not load activity: {activityQuery.error}{" "}
+            <Button size="xs" variant="ghost" onClick={activityQuery.refresh}>
+              Retry
+            </Button>
+          </p>
+        ) : null}
+        {error ? (
+          <p role="alert" className="text-xs text-destructive">
+            {error}{" "}
+            <Button size="xs" variant="ghost" onClick={stateQuery.refresh}>
+              Reload
+            </Button>
+          </p>
+        ) : null}
+        {notice ? (
+          <p role="status" className="text-xs text-muted-foreground">
+            {notice}
+          </p>
+        ) : null}
+        {stateQuery.isPending && !state ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            Loading suggestion settings…
+          </p>
+        ) : null}
+        {state ? (
+          <div className="space-y-7">
+            <SettingsForm
+              key={`${projectRef.environmentId}:${projectRef.projectId}:${state.settingsRevision}`}
+              projectRef={projectRef}
+              settings={state.settings}
+              sources={sourcesQuery.data?.sources ?? []}
+              canEdit={canEdit}
+              busy={busy === "save"}
+              onSave={(settings) => void save(settings)}
+            />
+            <section
+              aria-labelledby="scheduled-refresh-heading"
+              className="border-t border-border pt-5"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h3 id="scheduled-refresh-heading" className="text-sm font-medium">
+                    Scheduled refresh
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Timed suggestion updates are also shown under Scheduled tasks.
+                  </p>
+                </div>
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  disabled={!canSchedule}
+                  onClick={() => setScheduleEditor("new")}
+                >
+                  <PlusIcon /> Add schedule
+                </Button>
+              </div>
+              <ProjectReviewSchedules
                 projectRef={projectRef}
-                settings={state.settings}
-                sources={sourcesQuery.data?.sources ?? []}
-                canEdit={canEdit}
-                busy={busy === "save"}
-                onSave={(settings) => void save(settings)}
+                archived={archived}
+                editor={scheduleEditor}
+                onEditorChange={setScheduleEditor}
+                showEmpty={false}
               />
-              <section
-                aria-labelledby="scheduled-refresh-heading"
-                className="border-t border-border pt-5"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 id="scheduled-refresh-heading" className="text-sm font-medium">
-                      Scheduled refresh
-                    </h3>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Timed suggestion updates are also shown under Scheduled tasks.
-                    </p>
-                  </div>
+            </section>
+            <section
+              aria-labelledby="suggestion-activity-heading"
+              className="border-t border-border pt-5"
+            >
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <h3 id="suggestion-activity-heading" className="text-sm font-medium">
+                    Activity
+                  </h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {activity
+                      ? state.settings.modelSelection
+                        ? `${activity.updatesToday} of ${activity.maxUpdatesPerDay} updates today. Each update may make up to two model requests.`
+                        : `${activity.updatesToday} updates today. Choose an update model to apply project limits.`
+                      : "Loading activity…"}
+                  </p>
+                </div>
+                <div className="flex gap-1">
                   <Button
                     size="xs"
-                    variant="ghost-muted"
-                    disabled={!canSchedule}
-                    onClick={() => onManageSchedule("new")}
+                    variant="outline"
+                    disabled={
+                      !canRefresh ||
+                      !state.settings.modelSelection ||
+                      state.settings.paused ||
+                      busy !== null ||
+                      activity?.blockedReason === "daily-limit"
+                    }
+                    onClick={() => void run("refresh")}
                   >
-                    <PlusIcon /> Add schedule
+                    <RotateCcwIcon /> Refresh now
                   </Button>
-                </div>
-                {schedulesQuery.error ? (
-                  <p role="alert" className="mt-2 text-xs text-destructive">
-                    Could not load schedules: {schedulesQuery.error}{" "}
-                    <Button size="xs" variant="ghost" onClick={schedulesQuery.refresh}>
-                      Retry
-                    </Button>
-                  </p>
-                ) : null}
-                {schedulesQuery.isPending && !schedulesQuery.data ? (
-                  <p role="status" className="mt-2 text-xs text-muted-foreground">
-                    Loading timed updates…
-                  </p>
-                ) : schedules.length ? (
-                  <div className="mt-3 space-y-2">
-                    {schedules.map((schedule) => (
-                      <div
-                        key={schedule.id}
-                        className="flex items-start justify-between gap-3 rounded-lg border border-border p-3 text-xs"
-                      >
-                        <div className="min-w-0">
-                          <p className="font-medium break-words">
-                            {schedule.title} · {schedule.enabled ? "Active" : "Paused"}
-                          </p>
-                          <p className="mt-1 text-muted-foreground">
-                            {schedule.nextRunAt
-                              ? `Next ${new Date(schedule.nextRunAt).toLocaleString()}`
-                              : "No next run"}
-                            {schedule.lastRunAt
-                              ? ` · Last ${schedule.lastRunStatus} ${new Date(schedule.lastRunAt).toLocaleString()}`
-                              : ""}
-                          </p>
-                        </div>
-                        <Button
-                          size="xs"
-                          variant="ghost-muted"
-                          disabled={!canSchedule}
-                          onClick={() => onManageSchedule(schedule)}
-                        >
-                          Edit
-                        </Button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    No timed suggestion updates yet.
-                  </p>
-                )}
-              </section>
-              <section
-                aria-labelledby="suggestion-activity-heading"
-                className="border-t border-border pt-5"
-              >
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                  <div>
-                    <h3 id="suggestion-activity-heading" className="text-sm font-medium">
-                      Activity
-                    </h3>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      {activity
-                        ? state.settings.modelSelection
-                          ? `${activity.updatesToday} of ${activity.maxUpdatesPerDay} updates today. Each update may make up to two model requests.`
-                          : `${activity.updatesToday} updates today. Choose an update model to apply project limits.`
-                        : "Loading activity…"}
-                    </p>
-                  </div>
-                  <div className="flex gap-1">
+                  {lastFailed ? (
                     <Button
                       size="xs"
-                      variant="outline"
+                      variant="ghost-muted"
                       disabled={
                         !canRefresh ||
                         !state.settings.modelSelection ||
@@ -335,84 +296,68 @@ export function SuggestionSettingsPanel({
                         busy !== null ||
                         activity?.blockedReason === "daily-limit"
                       }
-                      onClick={() => void run("refresh")}
+                      onClick={() => void run("retry")}
                     >
-                      <RotateCcwIcon /> Refresh now
+                      Retry failed
                     </Button>
-                    {lastFailed ? (
-                      <Button
-                        size="xs"
-                        variant="ghost-muted"
-                        disabled={
-                          !canRefresh ||
-                          !state.settings.modelSelection ||
-                          state.settings.paused ||
-                          busy !== null ||
-                          activity?.blockedReason === "daily-limit"
-                        }
-                        onClick={() => void run("retry")}
-                      >
-                        Retry failed
-                      </Button>
-                    ) : null}
-                  </div>
+                  ) : null}
                 </div>
-                {!state.settings.modelSelection ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Choose and save an update model before refreshing this project.
-                  </p>
-                ) : null}
-                {activity?.pending ? (
-                  <p role="status" className="mt-3 text-xs text-muted-foreground">
-                    An update is queued. It will run when the project is available.
-                  </p>
-                ) : null}
-                {activity?.blockedReason ? (
-                  <p role="status" className="mt-2 text-xs text-warning-foreground">
-                    {REASON_LABEL[activity.blockedReason]}
-                    {activity.blockedReason === "paused"
-                      ? " · Resume in settings and save to continue."
-                      : null}
-                  </p>
-                ) : null}
-                {activity?.runs.length === 0 ? (
-                  <p className="mt-3 text-xs text-muted-foreground">No project updates yet.</p>
-                ) : null}
-                {activity?.runs.length ? (
-                  <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
-                    {activity.runs.map((run) => (
-                      <div key={run.id} className="rounded-lg border border-border p-3 text-xs">
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-medium">{TRIGGER_LABEL[run.trigger]}</span>
-                          <span className="text-muted-foreground">
-                            {new Date(run.startedAt).toLocaleString()} · {run.status}
-                          </span>
-                        </div>
-                        <p className="mt-1 text-muted-foreground">
-                          {run.contextRevision !== undefined
-                            ? `Context revision ${run.contextRevision} · `
-                            : ""}
-                          {run.contextEntryIds?.length
-                            ? `${run.contextEntryIds.length} context entries · `
-                            : ""}
-                          {run.suggestionIds.length
-                            ? `${run.suggestionIds.length} suggestions`
-                            : "No new suggestions"}
-                        </p>
-                        {run.summary ? (
-                          <p className="mt-1 text-muted-foreground">{run.summary}</p>
-                        ) : null}
-                        {run.error ? <p className="mt-1 text-destructive">{run.error}</p> : null}
+              </div>
+              {!state.settings.modelSelection ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Choose and save an update model before refreshing this project.
+                </p>
+              ) : null}
+              {activity?.pending ? (
+                <p role="status" className="mt-3 text-xs text-muted-foreground">
+                  An update is queued. It will run when the project is available.
+                </p>
+              ) : null}
+              {activity?.blockedReason ? (
+                <p role="status" className="mt-2 text-xs text-warning-foreground">
+                  {REASON_LABEL[activity.blockedReason]}
+                  {activity.blockedReason === "paused"
+                    ? " · Resume in settings and save to continue."
+                    : null}
+                </p>
+              ) : null}
+              {activity?.runs.length === 0 ? (
+                <p className="mt-3 text-xs text-muted-foreground">No project updates yet.</p>
+              ) : null}
+              {activity?.runs.length ? (
+                <div className="mt-3 max-h-72 space-y-2 overflow-y-auto">
+                  {activity.runs.map((run) => (
+                    <div key={run.id} className="rounded-lg border border-border p-3 text-xs">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-medium">{TRIGGER_LABEL[run.trigger]}</span>
+                        <span className="text-muted-foreground">
+                          {new Date(run.startedAt).toLocaleString()} · {run.status}
+                        </span>
                       </div>
-                    ))}
-                  </div>
-                ) : null}
-              </section>
-            </div>
-          ) : null}
-        </div>
-      </SheetPopup>
-    </Sheet>
+                      <p className="mt-1 text-muted-foreground">
+                        {run.contextRevision !== undefined
+                          ? `Context revision ${run.contextRevision} · `
+                          : ""}
+                        {run.contextEntryIds?.length
+                          ? `${run.contextEntryIds.length} context entries · `
+                          : ""}
+                        {run.suggestionIds.length
+                          ? `${run.suggestionIds.length} suggestions`
+                          : "No new suggestions"}
+                      </p>
+                      {run.summary ? (
+                        <p className="mt-1 text-muted-foreground">{run.summary}</p>
+                      ) : null}
+                      {run.error ? <p className="mt-1 text-destructive">{run.error}</p> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+          </div>
+        ) : null}
+      </div>
+    </MonarchPanelShell>
   );
 }
 

@@ -700,6 +700,7 @@ export default function ChatView(props: ChatViewProps) {
   const isMobileViewport = useMediaQuery("max-sm");
   const [workspaceLayoutElement, setWorkspaceLayoutElement] = useState<HTMLDivElement | null>(null);
   const narrowWorkspace = useElementWidthBelow(workspaceLayoutElement, 981);
+  const compactContainedPanel = useElementWidthBelow(workspaceLayoutElement, 720);
   const prefersPlanSidebarSheet = viewportPrefersPlanSidebarSheet || narrowWorkspace;
   const threadPanelPopoverAnchorRef = useRef<HTMLElement | null>(null);
   const [terminalUiLaunchContext, setTerminalUiLaunchContext] =
@@ -1047,7 +1048,8 @@ export default function ChatView(props: ChatViewProps) {
   const rightPanelState = useRightPanelStore((state) =>
     selectThreadRightPanelState(state.byThreadKey, activeThreadRef),
   );
-  const shouldUsePlanSidebarSheet = prefersPlanSidebarSheet && rightPanelState.maximized !== true;
+  const shouldUsePlanSidebarSheet =
+    !contained && prefersPlanSidebarSheet && rightPanelState.maximized !== true;
   const activeRightPanelSurface = useRightPanelStore((state) =>
     selectActiveRightPanelSurface(state.byThreadKey, activeThreadRef),
   );
@@ -1091,9 +1093,12 @@ export default function ChatView(props: ChatViewProps) {
     renderedRightPanelSurface,
   );
   const canMaximizeRightPanel = rightPanelOpen;
+  const forcedContainedPanel = contained && compactContainedPanel && rightPanelOpen;
   // An embedded side chat has no panel; a stale maximized flag would hide its own column.
   const rightPanelMaximized =
-    !embedded && canMaximizeRightPanel && rightPanelState.maximized === true;
+    !embedded &&
+    canMaximizeRightPanel &&
+    (rightPanelState.maximized === true || forcedContainedPanel);
   const inlineRightPanelOwnsTitleBar = rightPanelOpen && !shouldUsePlanSidebarSheet;
   const [threadPanelPopoverHandle] = useState(PopoverCreateHandle);
   const [chatCanvasStore] = useState(createChatCanvasStore);
@@ -3272,7 +3277,7 @@ export default function ChatView(props: ChatViewProps) {
   const panelLayoutControls = (
     <WorkspaceTitlebarControls
       contained={contained}
-      showMaximizeControl={!shouldUsePlanSidebarSheet}
+      showMaximizeControl={!shouldUsePlanSidebarSheet && !forcedContainedPanel}
       rightPanelOpen={rightPanelOpen}
       animationsActive={panelAnimationsActive}
       maximized={rightPanelMaximized}
@@ -3822,6 +3827,7 @@ export default function ChatView(props: ChatViewProps) {
                               key={`${activeProjectRef.environmentId}:${activeProjectRef.projectId}`}
                               projectRef={activeProjectRef}
                               branch={activeThreadBranch}
+                              dockEnabled={!embedded}
                             />
                           </div>
                         ) : null}
@@ -3974,10 +3980,12 @@ export default function ChatView(props: ChatViewProps) {
           layoutControls={
             rightPanelOpen ? (
               <div className="mr-px flex items-center gap-1">
-                <RightPanelMaximizeControl
-                  maximized={rightPanelMaximized}
-                  onToggle={toggleRightPanelMaximizedStable}
-                />
+                {!forcedContainedPanel ? (
+                  <RightPanelMaximizeControl
+                    maximized={rightPanelMaximized}
+                    onToggle={toggleRightPanelMaximizedStable}
+                  />
+                ) : null}
                 {panelToggleControls}
               </div>
             ) : null

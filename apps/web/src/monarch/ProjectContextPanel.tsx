@@ -20,19 +20,13 @@ import { useEffect, useState, type FormEvent } from "react";
 
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import {
-  Sheet,
-  SheetDescription,
-  SheetHeader,
-  SheetPopup,
-  SheetTitle,
-} from "../components/ui/sheet";
 import { Textarea } from "../components/ui/textarea";
 import { useQuietThreadShells } from "../state/entities";
 import { monarchEnvironment } from "../state/monarch";
 import { useEnvironmentQuery } from "../state/query";
 import { useAtomCommand } from "../state/use-atom-command";
 import { buildThreadRouteParams } from "../threadRoutes";
+import { MonarchPanelShell } from "./MonarchPanelShell";
 
 const KINDS = ["overview", "architecture", "decision", "question", "outcome"] as const;
 const KIND_LABEL: Record<MonarchContextEntry["kind"], string> = {
@@ -49,12 +43,14 @@ export function ProjectContextPanel({
   open,
   onClose,
   archived,
+  presentation,
 }: {
   projectRef: ScopedProjectRef;
   projectTitle: string;
   open: boolean;
   onClose: () => void;
   archived: boolean;
+  presentation?: "sheet" | "docked";
 }) {
   const stateQuery = useEnvironmentQuery(
     monarchEnvironment.context.live({
@@ -286,469 +282,460 @@ export function ProjectContextPanel({
   };
 
   return (
-    <Sheet
+    <MonarchPanelShell
+      title="Project context"
+      description={
+        <>
+          {projectTitle} · This environment and project only. Reported entries come from agent work;
+          confirmed entries are user decisions.
+        </>
+      }
+      presentation={presentation}
       open={open}
-      onOpenChange={(value) => {
-        if (!value) onClose();
-      }}
+      onClose={onClose}
     >
-      <SheetPopup className="w-[min(100vw,34rem)] max-w-[34rem]" side="right" layer="dialog">
-        <SheetHeader>
-          <SheetTitle>Project context</SheetTitle>
-          <SheetDescription>
-            {projectTitle} · This environment and project only. Reported entries come from agent
-            work; confirmed entries are user decisions.
-          </SheetDescription>
-        </SheetHeader>
-        <div className="min-h-0 overflow-y-auto px-5 py-5 sm:px-6">
-          {stateQuery.error ? (
-            <p role="alert" className="text-xs text-destructive">
-              Could not load context: {stateQuery.error}{" "}
-              <Button size="xs" variant="ghost" onClick={stateQuery.refresh}>
-                Retry
-              </Button>
-            </p>
-          ) : null}
-          {error ? (
-            <p role="alert" className="text-xs text-destructive">
-              {error}{" "}
-              <Button size="xs" variant="ghost" onClick={stateQuery.refresh}>
-                Reload
-              </Button>
-            </p>
-          ) : null}
-          {notice ? (
-            <p role="status" className="text-xs text-muted-foreground">
-              {notice}
-            </p>
-          ) : null}
-          {stateQuery.isPending && !state ? (
-            <p role="status" className="text-sm text-muted-foreground">
-              Loading project context…
-            </p>
-          ) : null}
-          {state ? (
-            <div className="space-y-7">
-              <section aria-labelledby="project-brief-heading">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 id="project-brief-heading" className="text-sm font-medium">
-                    Project brief
-                  </h3>
-                  <Button
-                    size="xs"
-                    variant="ghost-muted"
-                    disabled={!canConfigure}
-                    onClick={() => {
-                      setBriefDraft(state.settings.brief);
-                      setEditingBrief(true);
-                    }}
-                  >
-                    Edit
-                  </Button>
-                </div>
-                {editingBrief ? (
-                  <form
-                    className="mt-2 space-y-2"
-                    onSubmit={(event) => {
-                      event.preventDefault();
-                      void saveBrief(briefDraft);
-                    }}
-                  >
-                    <label className="block text-xs text-muted-foreground">
-                      Your direction and standing context
-                      <Textarea
-                        value={briefDraft}
-                        onChange={(event) => setBriefDraft(event.target.value)}
-                        maxLength={8000}
-                      />
-                    </label>
-                    <div className="flex gap-2">
-                      <Button size="xs" type="submit" disabled={busy === "brief"}>
-                        Save brief
-                      </Button>
-                      <Button size="xs" variant="ghost" onClick={() => setEditingBrief(false)}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </form>
-                ) : (
-                  <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
-                    {state.settings.brief ||
-                      "Add a project brief to guide future context and suggestions."}
-                  </p>
-                )}
-              </section>
-              <section
-                aria-labelledby="context-entries-heading"
-                className="border-t border-border pt-5"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <h3 id="context-entries-heading" className="text-sm font-medium">
-                    Current context
-                  </h3>
-                  <Button
-                    size="xs"
-                    variant="outline"
-                    disabled={!canEdit}
-                    onClick={() => setEditingEntry("new")}
-                  >
-                    <PlusIcon /> Add entry
-                  </Button>
-                </div>
-                {editingEntry ? (
-                  <ContextEntryEditor
-                    key={editingEntry === "new" ? "new" : editingEntry.id}
-                    entry={editingEntry === "new" ? null : editingEntry}
-                    busy={busy === "entry"}
-                    onSave={(input) => void saveEntry(input)}
-                    onCancel={() => setEditingEntry(null)}
-                  />
-                ) : null}
-                {entries.length === 0 && !editingEntry ? (
-                  <div className="mt-3 rounded-lg border border-dashed border-border p-4">
-                    <p className="text-sm font-medium">No context recorded yet</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Add a brief, write a decision, or build context from completed work in this
-                      project.
-                    </p>
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5 sm:px-6">
+        {stateQuery.error ? (
+          <p role="alert" className="text-xs text-destructive">
+            Could not load context: {stateQuery.error}{" "}
+            <Button size="xs" variant="ghost" onClick={stateQuery.refresh}>
+              Retry
+            </Button>
+          </p>
+        ) : null}
+        {error ? (
+          <p role="alert" className="text-xs text-destructive">
+            {error}{" "}
+            <Button size="xs" variant="ghost" onClick={stateQuery.refresh}>
+              Reload
+            </Button>
+          </p>
+        ) : null}
+        {notice ? (
+          <p role="status" className="text-xs text-muted-foreground">
+            {notice}
+          </p>
+        ) : null}
+        {stateQuery.isPending && !state ? (
+          <p role="status" className="text-sm text-muted-foreground">
+            Loading project context…
+          </p>
+        ) : null}
+        {state ? (
+          <div className="space-y-7">
+            <section aria-labelledby="project-brief-heading">
+              <div className="flex items-center justify-between gap-2">
+                <h3 id="project-brief-heading" className="text-sm font-medium">
+                  Project brief
+                </h3>
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  disabled={!canConfigure}
+                  onClick={() => {
+                    setBriefDraft(state.settings.brief);
+                    setEditingBrief(true);
+                  }}
+                >
+                  Edit
+                </Button>
+              </div>
+              {editingBrief ? (
+                <form
+                  className="mt-2 space-y-2"
+                  onSubmit={(event) => {
+                    event.preventDefault();
+                    void saveBrief(briefDraft);
+                  }}
+                >
+                  <label className="block text-xs text-muted-foreground">
+                    Your direction and standing context
+                    <Textarea
+                      value={briefDraft}
+                      onChange={(event) => setBriefDraft(event.target.value)}
+                      maxLength={8000}
+                    />
+                  </label>
+                  <div className="flex gap-2">
+                    <Button size="xs" type="submit" disabled={busy === "brief"}>
+                      Save brief
+                    </Button>
+                    <Button size="xs" variant="ghost" onClick={() => setEditingBrief(false)}>
+                      Cancel
+                    </Button>
                   </div>
-                ) : null}
-                {entries.length ? (
-                  <div className="mt-3 space-y-2">
-                    {entries.map((entry) => (
-                      <article key={entry.id} className="rounded-lg border border-border p-3.5">
-                        <div className="flex flex-wrap items-center gap-1.5 text-3xs text-muted-foreground">
-                          <span className="font-medium text-foreground">
-                            {KIND_LABEL[entry.kind]}
+                </form>
+              ) : (
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed text-muted-foreground">
+                  {state.settings.brief ||
+                    "Add a project brief to guide future context and suggestions."}
+                </p>
+              )}
+            </section>
+            <section
+              aria-labelledby="context-entries-heading"
+              className="border-t border-border pt-5"
+            >
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h3 id="context-entries-heading" className="text-sm font-medium">
+                  Current context
+                </h3>
+                <Button
+                  size="xs"
+                  variant="outline"
+                  disabled={!canEdit}
+                  onClick={() => setEditingEntry("new")}
+                >
+                  <PlusIcon /> Add entry
+                </Button>
+              </div>
+              {editingEntry ? (
+                <ContextEntryEditor
+                  key={editingEntry === "new" ? "new" : editingEntry.id}
+                  entry={editingEntry === "new" ? null : editingEntry}
+                  busy={busy === "entry"}
+                  onSave={(input) => void saveEntry(input)}
+                  onCancel={() => setEditingEntry(null)}
+                />
+              ) : null}
+              {entries.length === 0 && !editingEntry ? (
+                <div className="mt-3 rounded-lg border border-dashed border-border p-4">
+                  <p className="text-sm font-medium">No context recorded yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Add a brief, write a decision, or build context from completed work in this
+                    project.
+                  </p>
+                </div>
+              ) : null}
+              {entries.length ? (
+                <div className="mt-3 space-y-2">
+                  {entries.map((entry) => (
+                    <article key={entry.id} className="rounded-lg border border-border p-3.5">
+                      <div className="flex flex-wrap items-center gap-1.5 text-3xs text-muted-foreground">
+                        <span className="font-medium text-foreground">
+                          {KIND_LABEL[entry.kind]}
+                        </span>
+                        <span>·</span>
+                        <span>
+                          {entry.evidence === "confirmed"
+                            ? "Confirmed by user"
+                            : "Reported from work"}
+                        </span>
+                        <span>·</span>
+                        <span>
+                          {entry.scope === "branch"
+                            ? `Branch work: ${entry.branch ?? "unknown"}`
+                            : "Project wide"}
+                        </span>
+                        {entry.pinned ? (
+                          <span className="inline-flex items-center gap-1">
+                            <PinIcon size={11} /> Pinned
                           </span>
-                          <span>·</span>
-                          <span>
-                            {entry.evidence === "confirmed"
-                              ? "Confirmed by user"
-                              : "Reported from work"}
-                          </span>
-                          <span>·</span>
-                          <span>
-                            {entry.scope === "branch"
-                              ? `Branch work: ${entry.branch ?? "unknown"}`
-                              : "Project wide"}
-                          </span>
-                          {entry.pinned ? (
-                            <span className="inline-flex items-center gap-1">
-                              <PinIcon size={11} /> Pinned
-                            </span>
-                          ) : null}
-                        </div>
-                        <h4 className="mt-2 text-sm font-medium break-words">{entry.title}</h4>
-                        <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground break-words">
-                          {entry.body}
+                        ) : null}
+                      </div>
+                      <h4 className="mt-2 text-sm font-medium break-words">{entry.title}</h4>
+                      <p className="mt-1 whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground break-words">
+                        {entry.body}
+                      </p>
+                      {entry.contradictsEntryIds.length ? (
+                        <p className="mt-2 text-xs text-warning-foreground">
+                          Needs confirmation · Conflicts with {entry.contradictsEntryIds.length}{" "}
+                          other context{" "}
+                          {entry.contradictsEntryIds.length === 1 ? "entry" : "entries"}.
                         </p>
-                        {entry.contradictsEntryIds.length ? (
-                          <p className="mt-2 text-xs text-warning-foreground">
-                            Needs confirmation · Conflicts with {entry.contradictsEntryIds.length}{" "}
-                            other context{" "}
-                            {entry.contradictsEntryIds.length === 1 ? "entry" : "entries"}.
-                          </p>
-                        ) : null}
-                        {entry.sourceRefs.length ? (
-                          <div className="mt-2 flex flex-wrap gap-2 text-2xs">
-                            {entry.sourceRefs.map((source) => (
-                              <span
-                                key={`${source.threadId}:${source.runId ?? ""}`}
-                                className="inline-flex items-center gap-1.5"
+                      ) : null}
+                      {entry.sourceRefs.length ? (
+                        <div className="mt-2 flex flex-wrap gap-2 text-2xs">
+                          {entry.sourceRefs.map((source) => (
+                            <span
+                              key={`${source.threadId}:${source.runId ?? ""}`}
+                              className="inline-flex items-center gap-1.5"
+                            >
+                              <Link
+                                to="/$environmentId/$threadId"
+                                params={buildThreadRouteParams(
+                                  scopeThreadRef(projectRef.environmentId, source.threadId),
+                                )}
+                                className="inline-flex items-center gap-1 text-muted-foreground underline-offset-2 hover:underline"
                               >
-                                <Link
-                                  to="/$environmentId/$threadId"
-                                  params={buildThreadRouteParams(
-                                    scopeThreadRef(projectRef.environmentId, source.threadId),
-                                  )}
-                                  className="inline-flex items-center gap-1 text-muted-foreground underline-offset-2 hover:underline"
-                                >
-                                  {threadNames.get(source.threadId) || "Source thread"}{" "}
-                                  <ArrowUpRightIcon size={11} />
-                                </Link>
-                                <Button
-                                  size="xs"
-                                  variant="ghost-muted"
-                                  disabled={
-                                    !canConfigure ||
-                                    busy === `exclude:${source.threadId}` ||
-                                    state.settings.excludedThreadIds.includes(source.threadId)
-                                  }
-                                  onClick={() => void excludeSource(source.threadId)}
-                                >
-                                  Exclude source
-                                </Button>
-                              </span>
-                            ))}
-                          </div>
-                        ) : null}
-                        <div className="mt-3 flex flex-wrap gap-1 border-t border-border pt-2">
+                                {threadNames.get(source.threadId) || "Source thread"}{" "}
+                                <ArrowUpRightIcon size={11} />
+                              </Link>
+                              <Button
+                                size="xs"
+                                variant="ghost-muted"
+                                disabled={
+                                  !canConfigure ||
+                                  busy === `exclude:${source.threadId}` ||
+                                  state.settings.excludedThreadIds.includes(source.threadId)
+                                }
+                                onClick={() => void excludeSource(source.threadId)}
+                              >
+                                Exclude source
+                              </Button>
+                            </span>
+                          ))}
+                        </div>
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap gap-1 border-t border-border pt-2">
+                        <Button
+                          size="xs"
+                          variant="ghost-muted"
+                          disabled={!canEdit}
+                          onClick={() => setEditingEntry(entry)}
+                        >
+                          Edit
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="ghost-muted"
+                          disabled={!canEdit || busy === entry.id}
+                          onClick={() => void togglePin(entry)}
+                        >
+                          <PinIcon /> {entry.pinned ? "Unpin" : "Pin"}
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="ghost-muted"
+                          onClick={() => {
+                            setLatestHistoryEntries(new Map());
+                            setHistoryOpen(true);
+                            setHistoryBefore(null);
+                          }}
+                        >
+                          <HistoryIcon /> History
+                        </Button>
+                        <Button
+                          size="xs"
+                          variant="ghost-destructive"
+                          disabled={
+                            !canEdit ||
+                            busy === entry.id ||
+                            (entry.pinned && entry.evidence === "confirmed")
+                          }
+                          title={
+                            entry.pinned && entry.evidence === "confirmed"
+                              ? "Unpin this confirmed decision before removing it."
+                              : undefined
+                          }
+                          onClick={() =>
+                            void runMutation(entry.id, () =>
+                              removeEntry({
+                                environmentId: projectRef.environmentId,
+                                input: {
+                                  projectId: projectRef.projectId,
+                                  entryId: entry.id,
+                                  expectedRevision: entry.revision,
+                                },
+                              }),
+                            )
+                          }
+                        >
+                          <Trash2Icon /> Remove
+                        </Button>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : null}
+            </section>
+            <section
+              aria-labelledby="context-build-heading"
+              className="border-t border-border pt-5"
+            >
+              <h3 id="context-build-heading" className="text-sm font-medium">
+                Build context
+              </h3>
+              <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                Choose up to 20 completed threads to add to queued project updates. Excluded threads
+                stay out.
+              </p>
+              {sourcesQuery.error ? (
+                <p role="alert" className="mt-2 text-xs text-destructive">
+                  Could not load sources: {sourcesQuery.error}{" "}
+                  <Button size="xs" variant="ghost" onClick={sourcesQuery.refresh}>
+                    Retry
+                  </Button>
+                </p>
+              ) : null}
+              {sources.length ? (
+                <div className="mt-3 max-h-44 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
+                  {sources.map((source) => (
+                    <label
+                      key={source.threadId}
+                      className="flex items-start gap-2 rounded-md px-1 py-1 text-xs"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={validSelected.includes(source.threadId)}
+                        disabled={
+                          !availableSourceIds.has(source.threadId) ||
+                          (!validSelected.includes(source.threadId) && validSelected.length >= 20)
+                        }
+                        onChange={() => toggleSource(source.threadId)}
+                      />
+                      <span className="min-w-0">
+                        <span className="block font-medium break-words">{source.title}</span>
+                        <span className="text-2xs text-muted-foreground">
+                          {!availableSourceIds.has(source.threadId)
+                            ? "Excluded in suggestion settings"
+                            : new Date(source.completedAt).toLocaleString()}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  No completed project threads are available yet.
+                </p>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={
+                  !canBuild ||
+                  !state.settings.modelSelection ||
+                  state.settings.paused ||
+                  busy === "build" ||
+                  validSelected.length === 0
+                }
+                onClick={() => void buildContext()}
+              >
+                <BookOpenIcon /> {busy === "build" ? "Queuing…" : "Build context"}
+              </Button>
+              {!state.settings.modelSelection ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Choose and save an update model in suggestion settings before building context.
+                </p>
+              ) : null}
+              {state.settings.paused ? (
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Resume project updates in suggestion settings before building context.
+                </p>
+              ) : null}
+            </section>
+            <section
+              aria-labelledby="context-history-heading"
+              className="border-t border-border pt-5"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <h3 id="context-history-heading" className="text-sm font-medium">
+                  History
+                </h3>
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  onClick={() => {
+                    setLatestHistoryEntries(new Map());
+                    setHistoryOpen((value) => !value);
+                    setHistoryBefore(null);
+                  }}
+                >
+                  <HistoryIcon /> {historyOpen ? "Hide" : "Show"}
+                </Button>
+              </div>
+              {historyOpen ? (
+                <div className="mt-3 space-y-2">
+                  {historyQuery.error ? (
+                    <p role="alert" className="text-xs text-destructive">
+                      Could not load history: {historyQuery.error}{" "}
+                      <Button size="xs" variant="ghost" onClick={historyQuery.refresh}>
+                        Retry
+                      </Button>
+                    </p>
+                  ) : null}
+                  {historyQuery.isPending && !historyQuery.data ? (
+                    <p className="text-xs text-muted-foreground">Loading history…</p>
+                  ) : null}
+                  {historyItems.length === 0 && historyQuery.data ? (
+                    <p className="text-xs text-muted-foreground">No changes yet.</p>
+                  ) : null}
+                  {historyItems.map((item) => {
+                    const current =
+                      state.entries.find((entry) => entry.id === item.entry.id) ??
+                      latestHistoryEntries.get(item.entry.id) ??
+                      historyItems.find((row) => row.entry.id === item.entry.id)?.entry;
+                    return (
+                      <div
+                        key={item.sequence}
+                        className="rounded-lg border border-border p-3 text-xs"
+                      >
+                        <div className="flex flex-wrap items-center gap-1 text-muted-foreground">
+                          <span className="font-medium text-foreground">{item.entry.title}</span>
+                          <span>
+                            · {item.action} · revision {item.entry.revision}
+                          </span>
+                        </div>
+                        <p className="mt-1 line-clamp-2 text-muted-foreground">{item.entry.body}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
                           <Button
                             size="xs"
                             variant="ghost-muted"
-                            disabled={!canEdit}
-                            onClick={() => setEditingEntry(entry)}
-                          >
-                            Edit
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="ghost-muted"
-                            disabled={!canEdit || busy === entry.id}
-                            onClick={() => void togglePin(entry)}
-                          >
-                            <PinIcon /> {entry.pinned ? "Unpin" : "Pin"}
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="ghost-muted"
-                            onClick={() => {
-                              setLatestHistoryEntries(new Map());
-                              setHistoryOpen(true);
-                              setHistoryBefore(null);
-                            }}
-                          >
-                            <HistoryIcon /> History
-                          </Button>
-                          <Button
-                            size="xs"
-                            variant="ghost-destructive"
                             disabled={
                               !canEdit ||
-                              busy === entry.id ||
-                              (entry.pinned && entry.evidence === "confirmed")
-                            }
-                            title={
-                              entry.pinned && entry.evidence === "confirmed"
-                                ? "Unpin this confirmed decision before removing it."
-                                : undefined
+                              busy === `restore:${item.sequence}` ||
+                              !current ||
+                              (current.pinned &&
+                                current.evidence === "confirmed" &&
+                                item.entry.evidence !== "confirmed")
                             }
                             onClick={() =>
-                              void runMutation(entry.id, () =>
-                                removeEntry({
+                              void runMutation(`restore:${item.sequence}`, () =>
+                                restoreEntry({
                                   environmentId: projectRef.environmentId,
                                   input: {
                                     projectId: projectRef.projectId,
-                                    entryId: entry.id,
-                                    expectedRevision: entry.revision,
+                                    entryId: item.entry.id,
+                                    expectedRevision: current!.revision,
+                                    restoreRevision: item.entry.revision,
                                   },
                                 }),
                               )
                             }
                           >
-                            <Trash2Icon /> Remove
+                            <RotateCcwIcon /> Restore version
                           </Button>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                ) : null}
-              </section>
-              <section
-                aria-labelledby="context-build-heading"
-                className="border-t border-border pt-5"
-              >
-                <h3 id="context-build-heading" className="text-sm font-medium">
-                  Build context
-                </h3>
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Choose up to 20 completed threads to add to queued project updates. Excluded
-                  threads stay out.
-                </p>
-                {sourcesQuery.error ? (
-                  <p role="alert" className="mt-2 text-xs text-destructive">
-                    Could not load sources: {sourcesQuery.error}{" "}
-                    <Button size="xs" variant="ghost" onClick={sourcesQuery.refresh}>
-                      Retry
-                    </Button>
-                  </p>
-                ) : null}
-                {sources.length ? (
-                  <div className="mt-3 max-h-44 space-y-1 overflow-y-auto rounded-lg border border-border p-2">
-                    {sources.map((source) => (
-                      <label
-                        key={source.threadId}
-                        className="flex items-start gap-2 rounded-md px-1 py-1 text-xs"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={validSelected.includes(source.threadId)}
-                          disabled={
-                            !availableSourceIds.has(source.threadId) ||
-                            (!validSelected.includes(source.threadId) && validSelected.length >= 20)
-                          }
-                          onChange={() => toggleSource(source.threadId)}
-                        />
-                        <span className="min-w-0">
-                          <span className="block font-medium break-words">{source.title}</span>
-                          <span className="text-2xs text-muted-foreground">
-                            {!availableSourceIds.has(source.threadId)
-                              ? "Excluded in suggestion settings"
-                              : new Date(source.completedAt).toLocaleString()}
-                          </span>
-                        </span>
-                      </label>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    No completed project threads are available yet.
-                  </p>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={
-                    !canBuild ||
-                    !state.settings.modelSelection ||
-                    state.settings.paused ||
-                    busy === "build" ||
-                    validSelected.length === 0
-                  }
-                  onClick={() => void buildContext()}
-                >
-                  <BookOpenIcon /> {busy === "build" ? "Queuing…" : "Build context"}
-                </Button>
-                {!state.settings.modelSelection ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Choose and save an update model in suggestion settings before building context.
-                  </p>
-                ) : null}
-                {state.settings.paused ? (
-                  <p className="mt-2 text-xs text-muted-foreground">
-                    Resume project updates in suggestion settings before building context.
-                  </p>
-                ) : null}
-              </section>
-              <section
-                aria-labelledby="context-history-heading"
-                className="border-t border-border pt-5"
-              >
-                <div className="flex items-center justify-between gap-2">
-                  <h3 id="context-history-heading" className="text-sm font-medium">
-                    History
-                  </h3>
-                  <Button
-                    size="xs"
-                    variant="ghost-muted"
-                    onClick={() => {
-                      setLatestHistoryEntries(new Map());
-                      setHistoryOpen((value) => !value);
-                      setHistoryBefore(null);
-                    }}
-                  >
-                    <HistoryIcon /> {historyOpen ? "Hide" : "Show"}
-                  </Button>
-                </div>
-                {historyOpen ? (
-                  <div className="mt-3 space-y-2">
-                    {historyQuery.error ? (
-                      <p role="alert" className="text-xs text-destructive">
-                        Could not load history: {historyQuery.error}{" "}
-                        <Button size="xs" variant="ghost" onClick={historyQuery.refresh}>
-                          Retry
-                        </Button>
-                      </p>
-                    ) : null}
-                    {historyQuery.isPending && !historyQuery.data ? (
-                      <p className="text-xs text-muted-foreground">Loading history…</p>
-                    ) : null}
-                    {historyItems.length === 0 && historyQuery.data ? (
-                      <p className="text-xs text-muted-foreground">No changes yet.</p>
-                    ) : null}
-                    {historyItems.map((item) => {
-                      const current =
-                        state.entries.find((entry) => entry.id === item.entry.id) ??
-                        latestHistoryEntries.get(item.entry.id) ??
-                        historyItems.find((row) => row.entry.id === item.entry.id)?.entry;
-                      return (
-                        <div
-                          key={item.sequence}
-                          className="rounded-lg border border-border p-3 text-xs"
-                        >
-                          <div className="flex flex-wrap items-center gap-1 text-muted-foreground">
-                            <span className="font-medium text-foreground">{item.entry.title}</span>
-                            <span>
-                              · {item.action} · revision {item.entry.revision}
-                            </span>
-                          </div>
-                          <p className="mt-1 line-clamp-2 text-muted-foreground">
-                            {item.entry.body}
-                          </p>
-                          <div className="mt-2 flex flex-wrap gap-2">
-                            <Button
-                              size="xs"
-                              variant="ghost-muted"
-                              disabled={
-                                !canEdit ||
-                                busy === `restore:${item.sequence}` ||
-                                !current ||
-                                (current.pinned &&
-                                  current.evidence === "confirmed" &&
-                                  item.entry.evidence !== "confirmed")
-                              }
-                              onClick={() =>
-                                void runMutation(`restore:${item.sequence}`, () =>
-                                  restoreEntry({
-                                    environmentId: projectRef.environmentId,
-                                    input: {
-                                      projectId: projectRef.projectId,
-                                      entryId: item.entry.id,
-                                      expectedRevision: current!.revision,
-                                      restoreRevision: item.entry.revision,
-                                    },
-                                  }),
-                                )
-                              }
+                          {item.entry.sourceRefs.map((source) => (
+                            <Link
+                              key={source.threadId}
+                              to="/$environmentId/$threadId"
+                              params={buildThreadRouteParams(
+                                scopeThreadRef(projectRef.environmentId, source.threadId),
+                              )}
+                              className="text-muted-foreground underline-offset-2 hover:underline"
                             >
-                              <RotateCcwIcon /> Restore version
-                            </Button>
-                            {item.entry.sourceRefs.map((source) => (
-                              <Link
-                                key={source.threadId}
-                                to="/$environmentId/$threadId"
-                                params={buildThreadRouteParams(
-                                  scopeThreadRef(projectRef.environmentId, source.threadId),
-                                )}
-                                className="text-muted-foreground underline-offset-2 hover:underline"
-                              >
-                                Source <ArrowUpRightIcon size={11} className="inline" />
-                              </Link>
-                            ))}
-                          </div>
+                              Source <ArrowUpRightIcon size={11} className="inline" />
+                            </Link>
+                          ))}
                         </div>
-                      );
-                    })}
-                    {historyQuery.data?.nextBeforeSequence ? (
-                      <Button
-                        size="xs"
-                        variant="ghost-muted"
-                        onClick={() => {
-                          rememberHistoryPage();
-                          setHistoryBefore(historyQuery.data!.nextBeforeSequence);
-                        }}
-                      >
-                        Older changes
-                      </Button>
-                    ) : null}
-                    {historyBefore !== null ? (
-                      <Button
-                        size="xs"
-                        variant="ghost-muted"
-                        onClick={() => setHistoryBefore(null)}
-                      >
-                        Latest changes
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-              </section>
-            </div>
-          ) : null}
-        </div>
-      </SheetPopup>
-    </Sheet>
+                      </div>
+                    );
+                  })}
+                  {historyQuery.data?.nextBeforeSequence ? (
+                    <Button
+                      size="xs"
+                      variant="ghost-muted"
+                      onClick={() => {
+                        rememberHistoryPage();
+                        setHistoryBefore(historyQuery.data!.nextBeforeSequence);
+                      }}
+                    >
+                      Older changes
+                    </Button>
+                  ) : null}
+                  {historyBefore !== null ? (
+                    <Button size="xs" variant="ghost-muted" onClick={() => setHistoryBefore(null)}>
+                      Latest changes
+                    </Button>
+                  ) : null}
+                </div>
+              ) : null}
+            </section>
+          </div>
+        ) : null}
+      </div>
+    </MonarchPanelShell>
   );
 }
 

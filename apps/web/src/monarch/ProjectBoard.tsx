@@ -11,6 +11,7 @@ import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRightIcon, BookOpenIcon, GitBranchIcon, PlusIcon } from "lucide-react";
 import { lazy, Suspense, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 import { resolveSidebarThreadStatus } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
@@ -30,6 +31,7 @@ import {
   type ProjectThreadFilter,
 } from "./projectWorkspace.logic";
 import { ProjectPlanning } from "./ProjectPlanning";
+import { useMonarchDock } from "./MonarchDockContext";
 
 const FILTERS: readonly [ProjectThreadFilter, string][] = [
   ["all", "All"],
@@ -75,6 +77,7 @@ export function ProjectBoard({
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [contextOpen, setContextOpen] = useState(false);
+  const dock = useMonarchDock();
   const projectThreads = selectProjectThreads(
     threads,
     projectRef,
@@ -136,7 +139,10 @@ export function ProjectBoard({
             <PlusIcon />
             {starting ? "Opening…" : "New thread"}
           </Button>
-          <Button variant="outline" onClick={() => setContextOpen(true)}>
+          <Button
+            variant="outline"
+            onClick={() => (dock ? dock.open("context") : setContextOpen(true))}
+          >
             <BookOpenIcon /> Project context
           </Button>
           {actions}
@@ -147,7 +153,23 @@ export function ProjectBoard({
           </p>
         ) : null}
       </header>
-      {contextOpen ? (
+      {dock?.activeKind === "context" && dock.host
+        ? createPortal(
+            <Suspense fallback={null}>
+              <ProjectContextPanel
+                key={scopedProjectKey(projectRef)}
+                projectRef={projectRef}
+                projectTitle={project.title}
+                open
+                onClose={dock.close}
+                archived={project.archivedAt != null}
+                presentation="docked"
+              />
+            </Suspense>,
+            dock.host,
+          )
+        : null}
+      {!dock && contextOpen ? (
         <Suspense fallback={null}>
           <ProjectContextPanel
             key={scopedProjectKey(projectRef)}
