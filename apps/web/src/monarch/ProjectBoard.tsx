@@ -25,6 +25,7 @@ import {
   selectProjectThreads,
   type ProjectThreadFilter,
 } from "./projectWorkspace.logic";
+import { ProjectPlanning } from "./ProjectPlanning";
 
 const FILTERS: readonly [ProjectThreadFilter, string][] = [
   ["all", "All"],
@@ -107,8 +108,8 @@ export function ProjectBoard({
   }
 
   return (
-    <div className="mx-auto w-full max-w-[1160px] overflow-y-auto px-6 pt-7 pb-12">
-      <header className="mb-9">
+    <div className="mx-auto w-full max-w-[1160px] overflow-y-auto px-5 pt-6 pb-12 sm:px-6">
+      <header className="mb-8">
         <span className="block text-2xs break-words text-muted-foreground">
           {environment?.label ?? "Environment unavailable"}
         </span>
@@ -134,8 +135,15 @@ export function ProjectBoard({
           </p>
         ) : null}
       </header>
-      <section aria-labelledby="monarch-threads-heading">
-        <div className="flex items-center gap-2.5">
+      <ProjectPlanning projectRef={projectRef} archived={project.archivedAt != null} />
+      <section
+        aria-labelledby="monarch-threads-heading"
+        className="mt-8 border-t border-border pt-7"
+      >
+        <p className="text-3xs font-medium uppercase tracking-widest text-muted-foreground">
+          04 / History
+        </p>
+        <div className="mt-1 flex items-center gap-2.5">
           <h2 id="monarch-threads-heading" className="text-sm font-medium">
             Threads
           </h2>

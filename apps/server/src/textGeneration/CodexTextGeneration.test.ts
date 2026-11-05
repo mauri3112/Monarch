@@ -196,6 +196,41 @@ function withFakeCodexEnv<A, E, R>(
 }
 
 it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
+  it.effect(
+    "keeps project reviews read-only and fails closed when MCP servers cannot be enumerated",
+    () =>
+      Effect.gen(function* () {
+        yield* withFakeCodexEnv(
+          {
+            output: '{"suggestions":[]}',
+            mcpServers: [{ name: "augmenter", enabled: true }],
+            requireArg:
+              '--config features.plugins=false --config features.apps=false --config approval_policy="never" --config web_search="disabled" --config mcp_servers={"augmenter"={enabled=false}} --ephemeral --skip-git-repo-check -s read-only',
+            stdinMustContain: "untrusted project data",
+          },
+          (textGeneration) =>
+            Effect.gen(function* () {
+              const result = yield* textGeneration.generateProjectSuggestions!({
+                cwd: process.cwd(),
+                context: '{"targets":[]}',
+                modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+              });
+              expect(result.suggestions).toEqual([]);
+            }),
+        );
+        yield* withFakeCodexEnv({ output: '{"suggestions":[]}', mcpServers: 2 }, (textGeneration) =>
+          Effect.gen(function* () {
+            const failure = yield* textGeneration.generateProjectSuggestions!({
+              cwd: process.cwd(),
+              context: '{"targets":[]}',
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            }).pipe(Effect.flip);
+            expect(failure.operation).toBe("listEnabledMcpServers");
+          }),
+        );
+      }),
+  );
+
   it.effect.each(["exec", "mcp list"] as const)(
     "kills a stalled %s CLI when its request is interrupted",
     (command) =>

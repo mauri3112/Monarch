@@ -1,3 +1,5 @@
+import * as MonarchSchedules from "./monarch/MonarchScheduler.ts";
+import * as Monarch from "./monarch/MonarchService.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -1997,8 +1999,28 @@ export const layerWsRpc = (
         return yield* mutateProjectWithClone(projectService, projectCloneTracker, mutation);
       });
 
+      const monarch = yield* Monarch.MonarchService;
+      const monarchSchedules = yield* MonarchSchedules.MonarchScheduler;
       const voiceSessions = yield* VoiceSessionService.VoiceSessionService;
       const handlers = ServerWsRpcGroup.of({
+        [WS_METHODS.monarchSchedulesList]: (input) => monarchSchedules.list(input),
+        [WS_METHODS.monarchSchedulesSubscribe]: (input) => monarchSchedules.watch(input),
+        [WS_METHODS.monarchSchedulesUpsert]: (input) => monarchSchedules.upsert(input),
+        [WS_METHODS.monarchSchedulesSetEnabled]: (input) => monarchSchedules.setEnabled(input),
+        [WS_METHODS.monarchSchedulesRemove]: (input) => monarchSchedules.remove(input),
+        [WS_METHODS.monarchSchedulesRunNow]: (input) => monarchSchedules.runNow(input),
+        [WS_METHODS.monarchSchedulesHistory]: (input) => monarchSchedules.history(input),
+
+        [WS_METHODS.monarchProjectState]: (input) => monarch.list(input),
+        [WS_METHODS.monarchSubscribe]: (input) => monarch.watch(input),
+        [WS_METHODS.monarchCreateTarget]: (input) => monarch.createTarget(input),
+        [WS_METHODS.monarchUpdateTarget]: (input) => monarch.updateTarget(input),
+        [WS_METHODS.monarchCreateSuggestion]: (input) => monarch.createSuggestion(input),
+        [WS_METHODS.monarchUpdateSuggestion]: (input) => monarch.updateSuggestion(input),
+        [WS_METHODS.monarchSetSuggestionStatus]: (input) => monarch.setSuggestionStatus(input),
+        [WS_METHODS.monarchPrepareSuggestion]: (input) => monarch.prepareSuggestion(input),
+        [WS_METHODS.monarchMarkSuggestionUsed]: (input) => monarch.markSuggestionUsed(input),
+
         [WS_METHODS.voiceCapability]: (input) => voiceSessions.capability(input.threadId),
         [WS_METHODS.voiceStart]: (input) =>
           startup.enqueueCommand(voiceSessions.start(input, currentSessionId)).pipe(

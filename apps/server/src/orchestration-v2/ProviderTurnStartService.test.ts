@@ -1864,6 +1864,7 @@ effectIt.effect(
       const controls = harness.startRootRun.mock.calls[0]?.[0];
       expect(controls).toBeDefined();
       if (!controls) return;
+      expect(controls.voiceSessionId).toBe("lost-on-restart");
       const failure = yield* controls.session.startTurn(controls as never).pipe(Effect.flip);
       expect(failure._tag).toBe("ProviderAdapterTurnStartError");
       expect(harness.startTurn).not.toHaveBeenCalled();

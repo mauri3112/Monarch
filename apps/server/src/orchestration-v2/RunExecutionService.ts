@@ -5,6 +5,7 @@ import {
   CommandId,
   type EventId,
   type ModelSelection,
+  type MonarchTarget,
   type NodeId,
   type OrchestrationV2AppThread,
   type OrchestrationV2CheckpointScope,
@@ -39,6 +40,7 @@ import * as Stream from "effect/Stream";
 
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
+import * as Monarch from "../monarch/MonarchService.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
@@ -556,6 +558,7 @@ export type RunExecutionServiceV2Error = typeof RunExecutionServiceV2Error.Type;
 export interface RunExecutionServiceV2StartRootRunInput {
   readonly commandId: CommandId;
   readonly appThread: OrchestrationV2AppThread;
+  readonly voiceSessionId?: string;
   readonly providerSessionId: ProviderSessionId;
   readonly session: ProviderAdapter.ProviderAdapterV2SessionRuntime;
   readonly run: OrchestrationV2Run;
@@ -592,6 +595,35 @@ export class RunExecutionServiceV2 extends Context.Service<
   RunExecutionServiceV2Shape
 >()("t3/orchestration-v2/RunExecutionService/RunExecutionServiceV2") {}
 
+const VOICE_TARGET_CONTEXT_MAX_BYTES = 4_096;
+const VOICE_TARGET_CONTEXT_MAX_ITEMS = 8;
+
+/** Codex receives appContext as untrusted additionalContext, never as a spoken user message. */
+const voiceTargetContext = (targets: ReadonlyArray<MonarchTarget>): string => {
+  const active = targets.filter((target) => target.status === "active");
+  let text =
+    "Saved active project targets (snapshot). Read monarch_plan_read for current revisions. Change a target only after the user agrees.\n";
+  const shorten = (value: string, length: number) => Array.from(value).slice(0, length).join("");
+  let included = 0;
+  for (const target of active.slice(0, VOICE_TARGET_CONTEXT_MAX_ITEMS)) {
+    const line = `${JSON.stringify({
+      id: target.id,
+      revision: target.revision,
+      title: shorten(target.title, 120),
+      description: shorten(target.description, 300),
+      indicators: target.indicators.slice(0, 3).map((value) => shorten(value, 120)),
+      constraints: target.constraints.slice(0, 3).map((value) => shorten(value, 120)),
+    })}\n`;
+    if (Buffer.byteLength(text + line, "utf8") > VOICE_TARGET_CONTEXT_MAX_BYTES - 160) break;
+    text += line;
+    included++;
+  }
+  if (active.length > included)
+    text += `${active.length - included} more active targets. Read monarch_plan_read to see them.\n`;
+  if (active.length === 0) text += "No active targets are saved for this project.\n";
+  return text;
+};
+
 export const layer: Layer.Layer<
   RunExecutionServiceV2,
   never,
@@ -601,6 +633,7 @@ export const layer: Layer.Layer<
   | ProviderEventIngestor.ProviderEventIngestorV2
   | ServerSettings.ServerSettingsService
   | McpAppModelContext.McpAppModelContext
+  | Monarch.MonarchService
   | PreviewAgentActivity.PreviewAgentActivity
   | TurnItemPositionStore.TurnItemPositionStoreV2
 > = Layer.effect(
@@ -613,6 +646,7 @@ export const layer: Layer.Layer<
     const providerEventIngestor = yield* ProviderEventIngestor.ProviderEventIngestorV2;
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const mcpAppModelContext = yield* McpAppModelContext.McpAppModelContext;
+    const monarch = yield* Monarch.MonarchService;
     const previewAgentActivity = yield* PreviewAgentActivity.PreviewAgentActivity;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
@@ -1692,6 +1726,19 @@ export const layer: Layer.Layer<
           key: `mcp_app_${entry.itemId.replace(/[^\w.-]/g, "_")}`,
           text: entry.text,
         }));
+        if (input.voiceSessionId !== undefined) {
+          const state = yield* monarch
+            .list({ projectId: input.appThread.projectId })
+            .pipe(
+              Effect.catch(() =>
+                Effect.logWarning("Could not read project targets for voice context.").pipe(
+                  Effect.as(null),
+                ),
+              ),
+            );
+          if (state !== null)
+            appContext.push({ key: "monarch_targets", text: voiceTargetContext(state.targets) });
+        }
         const turnInput = {
           appThread: input.appThread,
           threadId: input.run.threadId,

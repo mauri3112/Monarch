@@ -181,15 +181,14 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         { concurrency: "unbounded" },
       );
       if (exitCode !== 0) {
-        yield* Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
-          reason: "exit",
-          exitCode,
+        return yield* new TextGenerationError({
+          operation: "listEnabledMcpServers",
+          detail: "Could not enumerate configured Codex MCP servers.",
         });
-        return [];
       }
       const servers = yield* decodeCodexMcpServers(stdout).pipe(
         Effect.tapError(() =>
-          Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
+          Effect.logWarning("codex mcp list failed", {
             reason: "decode",
           }),
         ),
@@ -201,13 +200,23 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
     Effect.flatMap(
       Option.match({
         onNone: () =>
-          Effect.logWarning("codex mcp list failed; text generation keeps its MCP servers", {
-            reason: "timeout",
-          }).pipe(Effect.as<ReadonlyArray<string>>([])),
+          Effect.fail(
+            new TextGenerationError({
+              operation: "listEnabledMcpServers",
+              detail: "Codex MCP enumeration timed out.",
+            }),
+          ),
         onSome: (names) => Effect.succeed(names),
       }),
     ),
-    Effect.orElseSucceed((): ReadonlyArray<string> => []),
+    Effect.mapError(
+      (cause) =>
+        new TextGenerationError({
+          operation: "listEnabledMcpServers",
+          detail: "Could not enumerate configured Codex MCP servers.",
+          cause,
+        }),
+    ),
   );
 
   const runCodexJson = Effect.fn("runCodexJson")(function* <S extends Schema.Top>({
@@ -275,7 +284,16 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         env,
         // `codex mcp` rejects --strict-config; the overrides still apply.
         launchArgs: execLaunchArgs.filter((arg) => arg !== "--strict-config"),
-      }).pipe(Effect.map(codexMcpServersOff));
+      }).pipe(
+        Effect.catch((cause) =>
+          operation === "generateProjectSuggestions"
+            ? Effect.fail(cause)
+            : Effect.logWarning(
+                "codex mcp list failed; text generation keeps its MCP servers",
+              ).pipe(Effect.as<ReadonlyArray<string>>([])),
+        ),
+        Effect.map(codexMcpServersOff),
+      );
       const spawnCommand = yield* resolveSpawnCommand(
         binary,
         [
@@ -283,6 +301,9 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...execLaunchArgs,
           // A user's MCP server could act on the text-generation prompt.
           ...CODEX_NO_PLUGIN_ARGS,
+          ...(operation === "generateProjectSuggestions"
+            ? ["--config", 'approval_policy="never"', "--config", 'web_search="disabled"']
+            : []),
           ...(mcpServersOff ? ["--config", mcpServersOff] : []),
           "--ephemeral",
           "--skip-git-repo-check",

@@ -80,6 +80,12 @@ jobs:
       - name: Check client permissions
         working-directory: packages/client-runtime
         run: vp test run src/state/commandPermissions.test.ts
+      - name: Check project planning and reviews
+        working-directory: apps/server
+        run: >-
+          vp test run src/monarch/MonarchService.test.ts src/monarch/MonarchScheduler.test.ts
+          src/mcp/toolkits/monarch/handlers.test.ts src/provider/AgentContextBudget.test.ts
+          src/textGeneration/CodexTextGeneration.test.ts src/orchestration-v2/RunExecutionService.test.ts
       - name: Check project workspace and voice client
         working-directory: apps/web
         run: >-

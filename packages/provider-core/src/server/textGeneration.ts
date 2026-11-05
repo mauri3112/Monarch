@@ -98,6 +98,24 @@ export type ReviewGuideGenerationResult = Omit<
 >;
 
 export interface ProviderTextGeneration {
+  /** Text-only planning. Missing on custom providers that do not implement this capability. */
+  readonly generateProjectSuggestions?: (input: {
+    readonly cwd: string;
+    readonly context: string;
+    readonly modelSelection: ModelSelection;
+  }) => Effect.Effect<
+    {
+      readonly suggestions: ReadonlyArray<{
+        readonly title: string;
+        readonly prompt: string;
+        readonly rationale: string;
+        readonly targetIds: ReadonlyArray<string>;
+        readonly sourceThreadIds: ReadonlyArray<string>;
+      }>;
+    },
+    TextGenerationError
+  >;
+
   readonly generateCommitMessage: (
     input: CommitMessageGenerationInput,
   ) => Effect.Effect<CommitMessageGenerationResult, TextGenerationError>;

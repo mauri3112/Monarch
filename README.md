@@ -2,9 +2,21 @@
 
 Monarch is a standalone, project-first app for working with coding agents. This public source MVP is a fork of [T3 Code](https://github.com/pingdotgg/t3code). The private Monarch plugin is a separate project and is not included here.
 
-The fork keeps T3 Code's provider connectors, event-sourced orchestration, thread history, approvals, and tool execution. Monarch adds its own project navigation and a Codex voice integration. Voice is experimental and depends on the installed Codex app-server and account capabilities. Other providers remain available for text conversations.
+The fork keeps T3 Code's provider connectors, event-sourced orchestration, thread history, approvals, and tool execution. Each Monarch project brings together Targets, scheduled tasks, suggested next threads, and its conversations. Codex voice is experimental and depends on the installed app-server and account capabilities. Other providers remain available for text conversations.
 
 For voice, configure Codex to use an existing CLI signed in with ChatGPT. Managed-token setups and API-key authentication are not supported for voice. Open a project, choose **Brainstorm with Codex**, then **Start voice**. Microphone access starts only after that action. Ending voice stops capture, and transcripts remain in the thread.
+
+## Direct a project
+
+Add a Target to describe a direction such as making installation dependable. Several Targets can stay active together. Progress indicators and constraints are optional; editing, pausing, archiving, and marking a Target achieved are explicit decisions. Saving a Target does not start an agent.
+
+The project's **Scheduled tasks** section contains two kinds of task. **Project reviews** examine active Targets and recent completed conversations, using a selected Codex or Claude model, and can produce up to three suggested next threads. **Scheduled work** runs a saved prompt through the existing agent workflow and its permission settings. Both need the Monarch server to be running. A laptop that is asleep cannot run a scheduled task.
+
+A review can run daily or weekly in a selected timezone, at an interval, or immediately with **Review now**. Run history records success or failure. After an offline gap, a review catches up once rather than replaying every missed occurrence. Reviews use bounded recent conversation excerpts, so their suggestions do not establish that the repository has been fully inspected or that reported work has been verified.
+
+Suggested next threads show their reasoning, related Targets, and source conversations. **Use** opens an editable draft and leaves sending to you. Reopening that suggestion keeps your draft edits. **Edit** changes the proposed prompt; **Remove** puts it in removed history, where it can be restored. A Target change makes an older suggestion stale until you review its relationship to the new direction. Once you send the draft, its suggestion links to the resulting thread.
+
+Targets, review schedules, run history, and suggestions persist locally. The private plugin's data is not imported automatically.
 
 ## Run from source
 

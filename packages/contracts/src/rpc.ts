@@ -1,4 +1,30 @@
 import {
+  MonarchSchedulesListInput,
+  MonarchSchedulesListResult,
+  MonarchSchedulesUpsertInput,
+  MonarchSchedulesSetEnabledInput,
+  MonarchSchedulesRemoveInput,
+  MonarchScheduleIdentity,
+  MonarchSchedulesRunNowResult,
+  MonarchSchedulesHistoryResult,
+  MonarchReviewSchedule,
+  MonarchScheduleError,
+} from "./monarchSchedules.ts";
+import {
+  MonarchProjectInput,
+  MonarchProjectState,
+  MonarchTarget,
+  NextThreadSuggestion,
+  MonarchCreateTargetInput,
+  MonarchUpdateTargetInput,
+  MonarchCreateSuggestionInput,
+  MonarchUpdateSuggestionInput,
+  MonarchSetSuggestionStatusInput,
+  MonarchSuggestionInput,
+  MonarchUseSuggestionInput,
+  MonarchError,
+} from "./monarch.ts";
+import {
   OrchestrationV2SearchThreadError,
   OrchestrationV2SearchThreadInput,
   OrchestrationV2SearchThreadResult,
@@ -415,6 +441,24 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  monarchSchedulesList: "monarch.schedules.list",
+  monarchSchedulesSubscribe: "monarch.schedules.subscribe",
+  monarchSchedulesUpsert: "monarch.schedules.upsert",
+  monarchSchedulesSetEnabled: "monarch.schedules.setEnabled",
+  monarchSchedulesRemove: "monarch.schedules.remove",
+  monarchSchedulesRunNow: "monarch.schedules.runNow",
+  monarchSchedulesHistory: "monarch.schedules.history",
+
+  monarchProjectState: "monarch.projectState",
+  monarchSubscribe: "monarch.subscribe",
+  monarchCreateTarget: "monarch.createTarget",
+  monarchUpdateTarget: "monarch.updateTarget",
+  monarchCreateSuggestion: "monarch.createSuggestion",
+  monarchUpdateSuggestion: "monarch.updateSuggestion",
+  monarchSetSuggestionStatus: "monarch.setSuggestionStatus",
+  monarchPrepareSuggestion: "monarch.prepareSuggestion",
+  monarchMarkSuggestionUsed: "monarch.markSuggestionUsed",
+
   projectsListEntries: "projects.listEntries",
   projectsListIgnoredFiles: "projects.listIgnoredFiles",
   projectsReadFile: "projects.readFile",
@@ -685,6 +729,104 @@ const WsProviderConsumeResetCreditRpc = Rpc.make(WS_METHODS.providerConsumeReset
   payload: ProviderConsumeResetCreditInput,
   success: ProviderConsumeResetCreditResult,
   error: Schema.Union([ProviderSetupError, UsageLimitSourceError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchProjectStateRpc = Rpc.make(WS_METHODS.monarchProjectState, {
+  payload: MonarchProjectInput,
+  success: MonarchProjectState,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchSubscribeRpc = Rpc.make(WS_METHODS.monarchSubscribe, {
+  payload: MonarchProjectInput,
+  success: MonarchProjectState,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsMonarchCreateTargetRpc = Rpc.make(WS_METHODS.monarchCreateTarget, {
+  payload: MonarchCreateTargetInput,
+  success: MonarchTarget,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchUpdateTargetRpc = Rpc.make(WS_METHODS.monarchUpdateTarget, {
+  payload: MonarchUpdateTargetInput,
+  success: MonarchTarget,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchCreateSuggestionRpc = Rpc.make(WS_METHODS.monarchCreateSuggestion, {
+  payload: MonarchCreateSuggestionInput,
+  success: NextThreadSuggestion,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchUpdateSuggestionRpc = Rpc.make(WS_METHODS.monarchUpdateSuggestion, {
+  payload: MonarchUpdateSuggestionInput,
+  success: NextThreadSuggestion,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchSetSuggestionStatusRpc = Rpc.make(WS_METHODS.monarchSetSuggestionStatus, {
+  payload: MonarchSetSuggestionStatusInput,
+  success: NextThreadSuggestion,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchPrepareSuggestionRpc = Rpc.make(WS_METHODS.monarchPrepareSuggestion, {
+  payload: MonarchSuggestionInput,
+  success: NextThreadSuggestion,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchMarkSuggestionUsedRpc = Rpc.make(WS_METHODS.monarchMarkSuggestionUsed, {
+  payload: MonarchUseSuggestionInput,
+  success: NextThreadSuggestion,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchSchedulesListRpc = Rpc.make(WS_METHODS.monarchSchedulesList, {
+  payload: MonarchSchedulesListInput,
+  success: MonarchSchedulesListResult,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchSchedulesSubscribeRpc = Rpc.make(WS_METHODS.monarchSchedulesSubscribe, {
+  payload: MonarchSchedulesListInput,
+  success: MonarchSchedulesListResult,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsMonarchSchedulesUpsertRpc = Rpc.make(WS_METHODS.monarchSchedulesUpsert, {
+  payload: MonarchSchedulesUpsertInput,
+  success: MonarchReviewSchedule,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchSchedulesSetEnabledRpc = Rpc.make(WS_METHODS.monarchSchedulesSetEnabled, {
+  payload: MonarchSchedulesSetEnabledInput,
+  success: MonarchReviewSchedule,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchSchedulesRemoveRpc = Rpc.make(WS_METHODS.monarchSchedulesRemove, {
+  payload: MonarchSchedulesRemoveInput,
+  success: Schema.Void,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchSchedulesRunNowRpc = Rpc.make(WS_METHODS.monarchSchedulesRunNow, {
+  payload: MonarchScheduleIdentity,
+  success: MonarchSchedulesRunNowResult,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchSchedulesHistoryRpc = Rpc.make(WS_METHODS.monarchSchedulesHistory, {
+  payload: MonarchScheduleIdentity,
+  success: MonarchSchedulesHistoryResult,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
 });
 
 const WsVoiceCapabilityRpc = Rpc.make(WS_METHODS.voiceCapability, {
@@ -2022,6 +2164,24 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 ) {}
 
 export const WsRpcGroup = RpcGroup.make(
+  WsMonarchSchedulesListRpc,
+  WsMonarchSchedulesSubscribeRpc,
+  WsMonarchSchedulesUpsertRpc,
+  WsMonarchSchedulesSetEnabledRpc,
+  WsMonarchSchedulesRemoveRpc,
+  WsMonarchSchedulesRunNowRpc,
+  WsMonarchSchedulesHistoryRpc,
+
+  WsMonarchProjectStateRpc,
+  WsMonarchSubscribeRpc,
+  WsMonarchCreateTargetRpc,
+  WsMonarchUpdateTargetRpc,
+  WsMonarchCreateSuggestionRpc,
+  WsMonarchUpdateSuggestionRpc,
+  WsMonarchSetSuggestionStatusRpc,
+  WsMonarchPrepareSuggestionRpc,
+  WsMonarchMarkSuggestionUsedRpc,
+
   WsVoiceCapabilityRpc,
   WsVoiceStartRpc,
   WsVoiceStopRpc,

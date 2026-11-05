@@ -146,6 +146,18 @@ vi.mock(import("../../hooks/useSettings"), async (original) => ({
 }));
 
 describe("ScheduledTasksSettings", () => {
+  it("opens a new task for the linked project", async () => {
+    setup();
+    await using _screen = await render(
+      <ScheduledTasksSettings environmentId={environmentId} projectId={projectId} newTask />,
+    );
+    const dialog = page.getByRole("dialog");
+    await expect.element(dialog.getByRole("heading", { name: "New task" })).toBeVisible();
+    await expect
+      .element(dialog.getByRole("combobox", { name: "Project" }))
+      .toHaveTextContent("Project");
+  });
+
   it("creates on a permitted secondary and reacts to permission changes", async () => {
     setup();
     state.secondary = true;

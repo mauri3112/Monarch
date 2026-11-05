@@ -1717,6 +1717,7 @@ export const layer: Layer.Layer<
       return runExecution.startRootRun({
         commandId: CommandId.make(`command:effect:provider-turn.start:${run.id}`),
         appThread: projection.thread,
+        ...(message.voiceSessionId === undefined ? {} : { voiceSessionId: message.voiceSessionId }),
         providerSessionId,
         session: ownedSession,
         run: runningRun,

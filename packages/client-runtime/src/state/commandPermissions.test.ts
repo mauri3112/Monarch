@@ -18,6 +18,7 @@ import {
   EnvironmentId,
   ORCHESTRATION_V2_WS_METHODS,
   ScheduledTaskId,
+  ProjectId,
   WS_METHODS,
   type AuthSessionState,
   type PeerLinkSummary,
@@ -177,24 +178,71 @@ describe("command permissions", () => {
     ),
   );
 
-  it.effect.each([WS_METHODS.scheduledTasksDelete, ORCHESTRATION_V2_WS_METHODS.stopWorkflow])(
-    "uses the target grant for both availability and execution of %s",
-    (method) =>
-      Effect.scoped(
-        Effect.gen(function* () {
-          const registry = yield* setup;
-          const permissions = createCommandPermissions(runtime, method);
-          registry.set(sessions(env), AsyncResult.success(grant(true)));
-          expect(registry.get(permissions.permissionAtom(env))).toBe(true);
-          expect(permissions.permissionAtom(env)).toBe(permissions.permissionAtom(env));
-          yield* permissions.authorize(registry, env);
-          registry.set(sessions(other), AsyncResult.success(grant(false)));
-          expect(registry.get(permissions.permissionAtom(other))).toBe(false);
-          const denied = yield* permissions.authorize(registry, other).pipe(Effect.flip);
-          expect(denied._tag).toBe("EnvironmentAuthorizationError");
-        }),
-      ),
+  it.effect.each([
+    WS_METHODS.scheduledTasksDelete,
+    ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
+    WS_METHODS.monarchCreateTarget,
+    WS_METHODS.monarchUpdateTarget,
+    WS_METHODS.monarchCreateSuggestion,
+    WS_METHODS.monarchUpdateSuggestion,
+    WS_METHODS.monarchSetSuggestionStatus,
+    WS_METHODS.monarchPrepareSuggestion,
+    WS_METHODS.monarchMarkSuggestionUsed,
+    WS_METHODS.monarchSchedulesUpsert,
+    WS_METHODS.monarchSchedulesSetEnabled,
+    WS_METHODS.monarchSchedulesRemove,
+    WS_METHODS.monarchSchedulesRunNow,
+  ])("uses the target grant for both availability and execution of %s", (method) =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const registry = yield* setup;
+        const permissions = createCommandPermissions(runtime, method);
+        registry.set(sessions(env), AsyncResult.success(grant(true)));
+        expect(registry.get(permissions.permissionAtom(env))).toBe(true);
+        expect(permissions.permissionAtom(env)).toBe(permissions.permissionAtom(env));
+        yield* permissions.authorize(registry, env);
+        registry.set(sessions(other), AsyncResult.success(grant(false)));
+        expect(registry.get(permissions.permissionAtom(other))).toBe(false);
+        const denied = yield* permissions.authorize(registry, other).pipe(Effect.flip);
+        expect(denied._tag).toBe("EnvironmentAuthorizationError");
+      }),
+    ),
   );
+  it("blocks a planning mutation before dispatch when the destination only grants reads", async () => {
+    const registry = AtomRegistry.make();
+    registry.mount(sessions(env));
+    registry.set(
+      sessions(env),
+      AsyncResult.success({
+        ...grant(false),
+        scopes: [AuthOrchestrationReadScope],
+        permissions: [AuthOrchestrationReadScope],
+      }),
+    );
+    const execute = vi.fn(() => Effect.die("Read-only planning mutation reached transport"));
+    const command = createEnvironmentRpcCommand(runtime, {
+      label: "test.monarch.prepareSuggestion",
+      tag: WS_METHODS.monarchPrepareSuggestion,
+      execute,
+    });
+    try {
+      expect(registry.get(command.permissionAtom(env))).toBe(false);
+      const result = await command.run(registry, {
+        environmentId: env,
+        input: { projectId: ProjectId.make("project"), id: "suggestion", expectedRevision: 1 },
+      });
+      expect(result._tag).toBe("Failure");
+      if (result._tag === "Failure") {
+        expect(Cause.squash(result.cause)).toMatchObject({
+          _tag: "EnvironmentAuthorizationError",
+          requiredPermission: AuthOrchestrationOperateScope,
+        });
+      }
+      expect(execute).not.toHaveBeenCalled();
+    } finally {
+      registry.dispose();
+    }
+  });
   it.effect("waits for an initial grant", () =>
     Effect.scoped(
       Effect.gen(function* () {

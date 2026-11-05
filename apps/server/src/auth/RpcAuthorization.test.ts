@@ -35,6 +35,33 @@ describe("RPC authorization scopes", () => {
     expect(new Set(Object.keys(RPC_REQUIRED_SCOPES))).toEqual(new Set(WsRpcGroup.requests.keys()));
   });
 
+  it("separates project planning reads from saved changes and inference", () => {
+    for (const method of [
+      WS_METHODS.monarchProjectState,
+      WS_METHODS.monarchSubscribe,
+      WS_METHODS.monarchSchedulesList,
+      WS_METHODS.monarchSchedulesSubscribe,
+      WS_METHODS.monarchSchedulesHistory,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
+    }
+    for (const method of [
+      WS_METHODS.monarchCreateTarget,
+      WS_METHODS.monarchUpdateTarget,
+      WS_METHODS.monarchCreateSuggestion,
+      WS_METHODS.monarchUpdateSuggestion,
+      WS_METHODS.monarchSetSuggestionStatus,
+      WS_METHODS.monarchPrepareSuggestion,
+      WS_METHODS.monarchMarkSuggestionUsed,
+      WS_METHODS.monarchSchedulesUpsert,
+      WS_METHODS.monarchSchedulesSetEnabled,
+      WS_METHODS.monarchSchedulesRemove,
+      WS_METHODS.monarchSchedulesRunNow,
+    ]) {
+      expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationOperateScope);
+    }
+  });
+
   it("keeps webhook delivery logs, which hold request bodies, behind operate scope", () => {
     for (const method of [
       WS_METHODS.voiceStart,

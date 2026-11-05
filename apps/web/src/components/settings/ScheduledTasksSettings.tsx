@@ -19,11 +19,12 @@ import type {
   ProjectId,
   ScheduledTask,
   ScheduledTaskId,
-  ScheduledTaskSchedule,
   ScheduledTaskUpsertInput,
   ScheduledTaskWebhookDeliverySummary,
   ThreadId,
 } from "@t3tools/contracts";
+import { scheduleLabel } from "./scheduledTaskLabels";
+export { scheduleLabel } from "./scheduledTaskLabels";
 import {
   DEFAULT_WEBHOOK_PROMPT,
   emptyWebhookFilterDraft,
@@ -294,30 +295,6 @@ function splitModelKey(value: string): ModelSelection | null {
   };
 }
 
-const ONCE_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  dateStyle: "medium",
-  timeStyle: "short",
-});
-
-export function scheduleLabel(schedule: ScheduledTaskSchedule): string {
-  if (schedule.type === "webhook") return "On webhook";
-  if (schedule.type === "once") return `Once, ${ONCE_FORMATTER.format(new Date(schedule.runAt))}`;
-  if (schedule.type === "interval") {
-    const minutes = schedule.everyMs / 60_000;
-    return Number.isInteger(minutes)
-      ? `Every ${minutes} min`
-      : `Every ${Math.round(schedule.everyMs / 1000)} sec`;
-  }
-  const weekdays = schedule.weekdays ?? [];
-  const days =
-    weekdays.length === 0
-      ? "Daily"
-      : weekdays.length === 5 && weekdays.every((day) => day >= 1 && day <= 5)
-        ? "Weekdays"
-        : weekdays.map((day) => WEEKDAY_LABELS[day]).join(", ");
-  return `${days} at ${schedule.timeOfDay}`;
-}
-
 /** formatRelativeTime handles only the past; upcoming runs need future labels. */
 function relativeLabel(value: string | null, nowMs: number): string {
   if (!value) return "Not scheduled";
@@ -366,6 +343,8 @@ function statusVariant(status: ScheduledTask["lastRunStatus"]) {
 export function ScheduledTasksSettings(target: {
   readonly environmentId?: EnvironmentId;
   readonly taskId?: ScheduledTaskId | undefined;
+  readonly projectId?: ProjectId;
+  readonly newTask?: boolean;
 }) {
   const { scope, environments, connectedEnvironments, environment } = useSettingsScope();
   const [editor, setEditor] = useState<{
@@ -408,10 +387,10 @@ export function ScheduledTasksSettings(target: {
   const navigate = useNavigate({ from: "/settings/scheduled-tasks" });
   const closeEditor = () => {
     setEditor(null);
-    if (target.taskId === undefined) return;
+    if (target.taskId === undefined && !target.newTask) return;
     void navigate({
       to: "/settings/scheduled-tasks",
-      search: ({ taskId: _closed, ...rest }) => rest,
+      search: ({ taskId: _closed, newTask: _new, ...rest }) => rest,
       replace: true,
     });
   };
@@ -424,9 +403,17 @@ export function ScheduledTasksSettings(target: {
     (_entry, index) => createPermissions[index],
   );
   const creationEnvironment =
-    permittedEnvironments.find(
-      (entry) => entry.environmentId === defaultEnvironment?.environmentId,
-    ) ?? permittedEnvironments[0];
+    target.newTask && target.environmentId
+      ? permittedEnvironments.find((entry) => entry.environmentId === target.environmentId)
+      : (permittedEnvironments.find(
+          (entry) =>
+            entry.environmentId === (target.environmentId ?? defaultEnvironment?.environmentId),
+        ) ?? permittedEnvironments[0]);
+  const effectiveEditor =
+    editor ??
+    (target.newTask && creationEnvironment
+      ? { environmentId: creationEnvironment.environmentId, task: null }
+      : null);
   return (
     <SettingsPageContainer>
       <SettingsSection
@@ -480,11 +467,17 @@ export function ScheduledTasksSettings(target: {
           </div>
         )}
       </SettingsSection>
-      {editor ? (
+      {target.newTask && !creationEnvironment ? (
+        <p role="alert" className="px-4 text-xs text-destructive">
+          This environment is unavailable for scheduled tasks.
+        </p>
+      ) : null}
+      {effectiveEditor ? (
         <ScheduledTaskEditorDialog
-          key={`${editor.environmentId}:${editor.task?.id ?? "new"}`}
-          initialEnvironmentId={editor.environmentId}
-          task={editor.task}
+          key={`${effectiveEditor.environmentId}:${effectiveEditor.task?.id ?? "new"}`}
+          initialEnvironmentId={effectiveEditor.environmentId}
+          initialProjectId={target.projectId}
+          task={effectiveEditor.task}
           onClose={closeEditor}
         />
       ) : null}
@@ -1112,10 +1105,12 @@ function WebhookDeliveryMode({ environmentId }: { readonly environmentId: Enviro
 
 function ScheduledTaskEditorDialog({
   initialEnvironmentId,
+  initialProjectId,
   task,
   onClose,
 }: {
   readonly initialEnvironmentId: EnvironmentId;
+  readonly initialProjectId?: ProjectId | undefined;
   readonly task: ScheduledTask | null;
   readonly onClose: () => void;
 }) {
@@ -1131,6 +1126,7 @@ function ScheduledTaskEditorDialog({
       <DialogPopup className="max-w-xl">
         <ScheduledTaskEditorForm
           initialEnvironmentId={initialEnvironmentId}
+          initialProjectId={initialProjectId}
           task={task}
           saving={saving}
           onSavingChange={setSaving}
@@ -1175,12 +1171,14 @@ function ScheduledTaskDestination({
 
 function ScheduledTaskEditorForm({
   initialEnvironmentId,
+  initialProjectId,
   task,
   saving,
   onSavingChange: setSaving,
   onClose,
 }: {
   readonly initialEnvironmentId: EnvironmentId;
+  readonly initialProjectId?: ProjectId | undefined;
   readonly task: ScheduledTask | null;
   readonly saving: boolean;
   readonly onSavingChange: (saving: boolean) => void;
@@ -1219,7 +1217,7 @@ function ScheduledTaskEditorForm({
       ? taskToDraft(task)
       : {
           ...EMPTY_DRAFT,
-          projectId: defaultScheduledTaskProjectId(scopedProjects, scope),
+          projectId: initialProjectId ?? defaultScheduledTaskProjectId(scopedProjects, scope),
         },
   );
   // Pinned first. The chosen project stays listed after it is archived.
