@@ -1,6 +1,10 @@
 import { makeAssistantStreamingFilter } from "./assistantStreaming.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
+  boundedProjectContextData,
+  providerPromptWithProjectContext,
+} from "@t3tools/shared/monarchContext";
+import {
   isOrchestrationV2WorkActive,
   CommandId,
   type EventId,
@@ -41,6 +45,7 @@ import * as Stream from "effect/Stream";
 import * as McpSessionRegistry from "../mcp/McpSessionRegistry.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as Monarch from "../monarch/MonarchService.ts";
+import * as MonarchContext from "../monarch/MonarchContextService.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as CheckpointService from "./CheckpointService.ts";
@@ -634,6 +639,7 @@ export const layer: Layer.Layer<
   | ServerSettings.ServerSettingsService
   | McpAppModelContext.McpAppModelContext
   | Monarch.MonarchService
+  | MonarchContext.MonarchContextService
   | PreviewAgentActivity.PreviewAgentActivity
   | TurnItemPositionStore.TurnItemPositionStoreV2
 > = Layer.effect(
@@ -647,6 +653,7 @@ export const layer: Layer.Layer<
     const serverSettings = yield* ServerSettings.ServerSettingsService;
     const mcpAppModelContext = yield* McpAppModelContext.McpAppModelContext;
     const monarch = yield* Monarch.MonarchService;
+    const monarchContext = yield* MonarchContext.MonarchContextService;
     const previewAgentActivity = yield* PreviewAgentActivity.PreviewAgentActivity;
     const turnItemPositions = yield* TurnItemPositionStore.TurnItemPositionStoreV2;
     const finalizationObserver = yield* RunFinalizationService.RunFinalizationObserver;
@@ -1739,6 +1746,20 @@ export const layer: Layer.Layer<
           if (state !== null)
             appContext.push({ key: "monarch_targets", text: voiceTargetContext(state.targets) });
         }
+        const projectBrief = yield* monarchContext
+          .brief({ projectId: input.appThread.projectId, branch: input.appThread.branch })
+          .pipe(
+            Effect.catch(() =>
+              Effect.logWarning("Could not read project context for this turn.").pipe(
+                Effect.as(null),
+              ),
+            ),
+          );
+        if (projectBrief?.text.trim())
+          appContext.push({
+            key: "monarch_project_context",
+            text: boundedProjectContextData(projectBrief),
+          });
         const turnInput = {
           appThread: input.appThread,
           threadId: input.run.threadId,
@@ -1756,7 +1777,13 @@ export const layer: Layer.Layer<
           attemptId: input.attemptId,
           rootNodeId: input.rootNode.id,
           providerThread: input.providerThread,
-          message: input.message,
+          message:
+            projectBrief?.text.trim() && input.session.driver !== "codex"
+              ? {
+                  ...input.message,
+                  text: providerPromptWithProjectContext(input.message.text, projectBrief),
+                }
+              : input.message,
           modelSelection: input.modelSelection,
           runtimePolicy: input.runtimePolicy,
           ...(appContext.length === 0 ? {} : { appContext }),

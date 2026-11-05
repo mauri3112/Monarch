@@ -11,6 +11,54 @@ export function createMonarchEnvironmentCommands<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
+    continuity: {
+      refresh: createEnvironmentRpcCommand(runtime, {
+        label: "monarch:continuity:refresh",
+        tag: WS_METHODS.monarchContinuityRefresh,
+      }),
+      activity: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+        label: "monarch:continuity:activity",
+        tag: WS_METHODS.monarchContinuitySubscribe,
+      }),
+      sources: createEnvironmentRpcQueryAtomFamily(runtime, {
+        label: "monarch:continuity:sources",
+        tag: WS_METHODS.monarchContinuitySources,
+      }),
+    },
+    context: {
+      get: createEnvironmentRpcQueryAtomFamily(runtime, {
+        label: "monarch:context:get",
+        tag: WS_METHODS.monarchContextGet,
+      }),
+      live: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+        label: "monarch:context:live",
+        tag: WS_METHODS.monarchContextSubscribe,
+      }),
+      history: createEnvironmentRpcQueryAtomFamily(runtime, {
+        label: "monarch:context:history",
+        tag: WS_METHODS.monarchContextHistory,
+      }),
+      brief: createEnvironmentRpcQueryAtomFamily(runtime, {
+        label: "monarch:context:brief",
+        tag: WS_METHODS.monarchContextBrief,
+      }),
+      updateSettings: createEnvironmentRpcCommand(runtime, {
+        label: "monarch:context:updateSettings",
+        tag: WS_METHODS.monarchContextUpdateSettings,
+      }),
+      upsertEntry: createEnvironmentRpcCommand(runtime, {
+        label: "monarch:context:upsertEntry",
+        tag: WS_METHODS.monarchContextUpsertEntry,
+      }),
+      removeEntry: createEnvironmentRpcCommand(runtime, {
+        label: "monarch:context:removeEntry",
+        tag: WS_METHODS.monarchContextRemoveEntry,
+      }),
+      restoreEntry: createEnvironmentRpcCommand(runtime, {
+        label: "monarch:context:restoreEntry",
+        tag: WS_METHODS.monarchContextRestoreEntry,
+      }),
+    },
     schedules: {
       list: createEnvironmentRpcQueryAtomFamily(runtime, {
         label: "monarch:schedules:list",

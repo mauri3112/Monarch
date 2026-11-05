@@ -1,5 +1,6 @@
 import * as MonarchSchedules from "./monarch/MonarchScheduler.ts";
 import * as Monarch from "./monarch/MonarchService.ts";
+import * as MonarchContext from "./monarch/MonarchContextService.ts";
 import { OrchestrationDispatchCommandError } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as SecureRandom from "effect/crypto/SecureRandom";
@@ -2000,9 +2001,22 @@ export const layerWsRpc = (
       });
 
       const monarch = yield* Monarch.MonarchService;
+      const monarchContext = yield* MonarchContext.MonarchContextService;
       const monarchSchedules = yield* MonarchSchedules.MonarchScheduler;
       const voiceSessions = yield* VoiceSessionService.VoiceSessionService;
       const handlers = ServerWsRpcGroup.of({
+        [WS_METHODS.monarchContextGet]: (input) => monarchContext.get(input),
+        [WS_METHODS.monarchContinuityRefresh]: (input) => monarchSchedules.refresh(input),
+        [WS_METHODS.monarchContinuityActivity]: (input) => monarchSchedules.activity(input),
+        [WS_METHODS.monarchContinuitySubscribe]: (input) => monarchSchedules.watchActivity(input),
+        [WS_METHODS.monarchContinuitySources]: (input) => monarchSchedules.sources(input),
+        [WS_METHODS.monarchContextSubscribe]: (input) => monarchContext.watch(input),
+        [WS_METHODS.monarchContextUpdateSettings]: (input) => monarchContext.updateSettings(input),
+        [WS_METHODS.monarchContextUpsertEntry]: (input) => monarchContext.upsertEntry(input),
+        [WS_METHODS.monarchContextRemoveEntry]: (input) => monarchContext.removeEntry(input),
+        [WS_METHODS.monarchContextRestoreEntry]: (input) => monarchContext.restoreEntry(input),
+        [WS_METHODS.monarchContextHistory]: (input) => monarchContext.history(input),
+        [WS_METHODS.monarchContextBrief]: (input) => monarchContext.brief(input),
         [WS_METHODS.monarchSchedulesList]: (input) => monarchSchedules.list(input),
         [WS_METHODS.monarchSchedulesSubscribe]: (input) => monarchSchedules.watch(input),
         [WS_METHODS.monarchSchedulesUpsert]: (input) => monarchSchedules.upsert(input),

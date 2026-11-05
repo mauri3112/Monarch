@@ -181,6 +181,11 @@ describe("command permissions", () => {
   it.effect.each([
     WS_METHODS.scheduledTasksDelete,
     ORCHESTRATION_V2_WS_METHODS.stopWorkflow,
+    WS_METHODS.monarchContextUpdateSettings,
+    WS_METHODS.monarchContinuityRefresh,
+    WS_METHODS.monarchContextUpsertEntry,
+    WS_METHODS.monarchContextRemoveEntry,
+    WS_METHODS.monarchContextRestoreEntry,
     WS_METHODS.monarchCreateTarget,
     WS_METHODS.monarchUpdateTarget,
     WS_METHODS.monarchCreateSuggestion,

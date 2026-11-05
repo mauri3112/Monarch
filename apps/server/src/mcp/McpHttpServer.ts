@@ -52,6 +52,8 @@ import { ProjectToolkit } from "./toolkits/project/tools.ts";
 import * as ProjectHandlers from "./toolkits/project/handlers.ts";
 import { MonarchToolkit } from "./toolkits/monarch/tools.ts";
 import * as MonarchHandlers from "./toolkits/monarch/handlers.ts";
+import { MonarchContextToolkit } from "./toolkits/monarch/contextTools.ts";
+import * as MonarchContextHandlers from "./toolkits/monarch/contextHandlers.ts";
 import { AttachmentToolkit } from "./toolkits/attachment/tools.ts";
 import * as AttachmentHandlers from "./toolkits/attachment/handlers.ts";
 import { ThreadToolkit } from "./toolkits/thread/tools.ts";
@@ -1140,6 +1142,10 @@ const layerEnvironmentToolkit = toolkitRegistration(
 
 export const layerProjectRegistration = toolkitRegistration(ProjectToolkit, ProjectHandlers.layer);
 export const layerMonarchToolkit = toolkitRegistration(MonarchToolkit, MonarchHandlers.layer);
+export const layerMonarchContextToolkit = toolkitRegistration(
+  MonarchContextToolkit,
+  MonarchContextHandlers.layer,
+);
 
 export const layerAttachmentToolkit = toolkitRegistration(
   AttachmentToolkit,
@@ -1203,6 +1209,7 @@ export const layerTools = Layer.mergeAll(
   layerAttachmentToolkit,
   layerProjectRegistration,
   layerMonarchToolkit,
+  layerMonarchContextToolkit,
   layerEnvironmentToolkit,
   layerPreviewControlsRegistration,
   layerWorktreeToolkitRegistration,

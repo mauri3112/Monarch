@@ -17,6 +17,7 @@ import * as SqlClient from "effect/sql/SqlClient";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as MonarchService from "./MonarchService.ts";
+import * as MonarchContextService from "./MonarchContextService.ts";
 
 const fixture = Effect.fn("fixture")(function* (suffix: string) {
   const projects = yield* ProjectStore.ProjectStoreV2;
@@ -58,6 +59,7 @@ const createSuggestion = (
   service: MonarchService.MonarchService["Service"],
   target: MonarchTarget,
   dedupeKey?: string,
+  contextRevision?: number,
 ) =>
   service.createSuggestion({
     projectId: target.projectId,
@@ -67,6 +69,7 @@ const createSuggestion = (
     targets: [{ targetId: target.id, revision: target.revision }],
     sourceThreadIds: [],
     ...(dedupeKey === undefined ? {} : { dedupeKey }),
+    ...(contextRevision === undefined ? {} : { contextRevision }),
   });
 const input = (suggestion: NextThreadSuggestion) => ({
   projectId: suggestion.projectId,
@@ -82,7 +85,11 @@ const insertThread = Effect.fn("insertThread")(function* (
     (thread_id, project_id, title, default_provider, runtime_mode, interaction_mode, created_at, updated_at, payload_json)
     VALUES (${threadId}, ${projectId}, 'Synthetic thread', 'codex', 'full-access', 'default', '2026-11-05', '2026-11-05', '{}')`;
 });
-const testLayer = Layer.merge(MonarchService.layer, ProjectStore.layer).pipe(
+const testLayer = Layer.mergeAll(
+  MonarchService.layer,
+  MonarchContextService.layer,
+  ProjectStore.layer,
+).pipe(
   Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(SecureRandom.layerWebCrypto),
 );
@@ -327,11 +334,23 @@ it.layer(testLayer)("Monarch planning", (it) => {
   );
 
   it.effect(
-    "blocks stale target references until explicitly rebased and recovers used links after lost acknowledgement",
+    "blocks stale target and context references until explicitly reviewed and recovers used links after lost acknowledgement",
     () =>
       Effect.gen(function* () {
         const { service, projectId, target } = yield* fixture("stale");
-        const suggestion = yield* createSuggestion(service, target);
+        const context = yield* MonarchContextService.MonarchContextService;
+        const initial = yield* context.get({ projectId });
+        const contextState = yield* context.updateSettings({
+          projectId,
+          expectedRevision: 0,
+          settings: { ...initial.settings, brief: "Keep research reproducible." },
+        });
+        const suggestion = yield* createSuggestion(
+          service,
+          target,
+          undefined,
+          contextState.revision,
+        );
         const revised = yield* service.updateTarget({
           ...target,
           title: "Reproducible research",
@@ -347,6 +366,33 @@ it.layer(testLayer)("Monarch planning", (it) => {
           targets: [{ targetId: revised.id, revision: revised.revision }],
         });
         const prepared = yield* service.prepareSuggestion(input(rebased));
+        const changedContext = yield* context.updateSettings({
+          projectId,
+          expectedRevision: contextState.settingsRevision,
+          settings: {
+            ...contextState.settings,
+            brief: "Require explicit provenance for each data input.",
+          },
+        });
+        const staleContext = yield* service.prepareSuggestion(input(prepared)).pipe(Effect.result);
+        assert.isTrue(Result.isFailure(staleContext));
+        if (Result.isFailure(staleContext))
+          assert.strictEqual(staleContext.failure.reason, "conflict");
+        const staleGeneration = yield* service
+          .createSuggestion({ ...suggestion, targets: rebased.targets })
+          .pipe(Effect.result);
+        assert.isTrue(Result.isFailure(staleGeneration));
+        if (Result.isFailure(staleGeneration))
+          assert.strictEqual(staleGeneration.failure.reason, "conflict");
+        const reviewed = yield* service.updateSuggestion({
+          ...input(prepared),
+          title: prepared.title,
+          prompt: prepared.prompt,
+          contextRevision: changedContext.revision,
+        });
+        const continued = yield* service.prepareSuggestion(input(reviewed));
+        assert.strictEqual(continued.draftThreadId, prepared.draftThreadId);
+        assert.strictEqual(continued.prompt, prepared.prompt);
         yield* service.updateTarget({
           ...revised,
           expectedRevision: revised.revision,

@@ -37,6 +37,13 @@ describe("RPC authorization scopes", () => {
 
   it("separates project planning reads from saved changes and inference", () => {
     for (const method of [
+      WS_METHODS.monarchContextGet,
+      WS_METHODS.monarchContinuityActivity,
+      WS_METHODS.monarchContinuitySubscribe,
+      WS_METHODS.monarchContinuitySources,
+      WS_METHODS.monarchContextSubscribe,
+      WS_METHODS.monarchContextHistory,
+      WS_METHODS.monarchContextBrief,
       WS_METHODS.monarchProjectState,
       WS_METHODS.monarchSubscribe,
       WS_METHODS.monarchSchedulesList,
@@ -46,6 +53,11 @@ describe("RPC authorization scopes", () => {
       expect(requiredScopeForRpcMethod(method)).toBe(AuthOrchestrationReadScope);
     }
     for (const method of [
+      WS_METHODS.monarchContextUpdateSettings,
+      WS_METHODS.monarchContinuityRefresh,
+      WS_METHODS.monarchContextUpsertEntry,
+      WS_METHODS.monarchContextRemoveEntry,
+      WS_METHODS.monarchContextRestoreEntry,
       WS_METHODS.monarchCreateTarget,
       WS_METHODS.monarchUpdateTarget,
       WS_METHODS.monarchCreateSuggestion,

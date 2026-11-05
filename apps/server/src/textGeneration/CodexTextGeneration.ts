@@ -286,7 +286,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
         launchArgs: execLaunchArgs.filter((arg) => arg !== "--strict-config"),
       }).pipe(
         Effect.catch((cause) =>
-          operation === "generateProjectSuggestions"
+          operation === "generateProjectSuggestions" || operation === "generateProjectContext"
             ? Effect.fail(cause)
             : Effect.logWarning(
                 "codex mcp list failed; text generation keeps its MCP servers",
@@ -301,7 +301,7 @@ export const makeCodexTextGeneration = Effect.fn("makeCodexTextGeneration")(func
           ...execLaunchArgs,
           // A user's MCP server could act on the text-generation prompt.
           ...CODEX_NO_PLUGIN_ARGS,
-          ...(operation === "generateProjectSuggestions"
+          ...(operation === "generateProjectSuggestions" || operation === "generateProjectContext"
             ? ["--config", 'approval_policy="never"', "--config", 'web_search="disabled"']
             : []),
           ...(mcpServersOff ? ["--config", mcpServersOff] : []),

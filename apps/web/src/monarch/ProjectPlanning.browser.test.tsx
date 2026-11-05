@@ -8,6 +8,7 @@ import { ProjectPlanning } from "./ProjectPlanning";
 
 const mocks = vi.hoisted(() => ({
   canEdit: true,
+  context: { revision: 2, settings: { enabled: false, paused: false } },
   data: {
     targets: [
       {
@@ -53,7 +54,8 @@ vi.mock("@effect/atom-react", async (importOriginal) => ({
 }));
 vi.mock("../state/monarch", () => ({
   monarchEnvironment: {
-    projectState: () => ({}),
+    projectState: () => ({ kind: "planning" }),
+    context: { live: () => ({ kind: "context" }) },
     createTarget: { permissionAtom: () => ({}) },
     updateTarget: { permissionAtom: () => ({}) },
     updateSuggestion: { permissionAtom: () => ({}) },
@@ -62,8 +64,8 @@ vi.mock("../state/monarch", () => ({
   },
 }));
 vi.mock("../state/query", () => ({
-  useEnvironmentQuery: () => ({
-    data: mocks.data,
+  useEnvironmentQuery: (query: { kind: string }) => ({
+    data: query.kind === "context" ? mocks.context : mocks.data,
     error: null,
     isPending: false,
     refresh: mocks.refresh,
@@ -79,6 +81,7 @@ vi.mock("./usePrepareSuggestionDraft", () => ({
 }));
 vi.mock("./ProjectReviewSchedules", () => ({ ProjectReviewSchedules: () => null }));
 vi.mock("./ProjectSchedules", () => ({ ProjectSchedules: () => null }));
+vi.mock("./SuggestionSettingsPanel", () => ({ SuggestionSettingsPanel: () => null }));
 
 const projectRef = scopeProjectRef(
   EnvironmentId.make("environment-1"),
@@ -88,9 +91,12 @@ const projectRef = scopeProjectRef(
 it("saves a Target in the current environment and project", async () => {
   mocks.canEdit = true;
   mocks.command.mockClear();
-  await using screen = await render(<ProjectPlanning projectRef={projectRef} archived={false} />, {
-    router: "/workspace/environment-1/project-1",
-  });
+  await using screen = await render(
+    <ProjectPlanning projectRef={projectRef} projectTitle="Test project" archived={false} />,
+    {
+      router: "/workspace/environment-1/project-1",
+    },
+  );
   await userEvent.click(screen.getByRole("button", { name: "Add target" }));
   await userEvent.fill(screen.getByRole("textbox", { name: "Title" }), "Make setup dependable");
   await userEvent.click(screen.getByRole("button", { name: "Save Target" }));
@@ -105,9 +111,12 @@ it("requires explicit review before a stale suggestion can prepare a draft", asy
   mocks.canEdit = true;
   mocks.command.mockClear();
   mocks.prepare.mockClear();
-  await using screen = await render(<ProjectPlanning projectRef={projectRef} archived={false} />, {
-    router: "/workspace/environment-1/project-1",
-  });
+  await using screen = await render(
+    <ProjectPlanning projectRef={projectRef} projectTitle="Test project" archived={false} />,
+    {
+      router: "/workspace/environment-1/project-1",
+    },
+  );
   await expect.element(screen.getByRole("button", { name: "Use" })).toBeDisabled();
   await userEvent.click(screen.getByRole("button", { name: "Edit" }));
   await userEvent.click(screen.getByRole("checkbox", { name: /I reviewed this prompt/ }));
@@ -124,11 +133,47 @@ it("requires explicit review before a stale suggestion can prepare a draft", asy
   expect(mocks.prepare).not.toHaveBeenCalled();
 });
 
+it("requires explicit review when project context changes", async () => {
+  mocks.canEdit = true;
+  mocks.command.mockClear();
+  mocks.prepare.mockClear();
+  const suggestion = mocks.data.suggestions[0]!;
+  suggestion.targets[0]!.revision = 2;
+  Object.assign(suggestion, { contextRevision: 1 });
+  try {
+    await using screen = await render(
+      <ProjectPlanning projectRef={projectRef} projectTitle="Test project" archived={false} />,
+      { router: "/workspace/environment-1/project-1" },
+    );
+    await expect.element(screen.getByText("Project context changed")).toBeVisible();
+    await expect.element(screen.getByRole("button", { name: "Use" })).toBeDisabled();
+    await userEvent.click(screen.getByRole("button", { name: "Edit" }));
+    await userEvent.click(
+      screen.getByRole("checkbox", {
+        name: /reviewed this prompt against the current project context/,
+      }),
+    );
+    await userEvent.click(screen.getByRole("button", { name: "Save edit" }));
+    await vi.waitFor(() => expect(mocks.command).toHaveBeenCalled());
+    expect(mocks.command.mock.calls.at(-1)?.[1]).toMatchObject({
+      environmentId: "environment-1",
+      input: { projectId: "project-1", id: "suggestion-1", contextRevision: 2 },
+    });
+    expect(mocks.prepare).not.toHaveBeenCalled();
+  } finally {
+    suggestion.targets[0]!.revision = 1;
+    Reflect.deleteProperty(suggestion, "contextRevision");
+  }
+});
+
 it("keeps mutations unavailable without an operate grant", async () => {
   mocks.canEdit = false;
-  await using screen = await render(<ProjectPlanning projectRef={projectRef} archived={false} />, {
-    router: "/workspace/environment-1/project-1",
-  });
+  await using screen = await render(
+    <ProjectPlanning projectRef={projectRef} projectTitle="Test project" archived={false} />,
+    {
+      router: "/workspace/environment-1/project-1",
+    },
+  );
   await expect.element(screen.getByRole("button", { name: "Add target" })).toBeDisabled();
   await expect.element(screen.getByRole("button", { name: "Remove" })).toBeDisabled();
   await expect.element(screen.getByRole("button", { name: "Use" })).toBeDisabled();
@@ -145,7 +190,7 @@ it("records a suggestion as used only after its reserved thread is persisted", a
   });
   try {
     await using screen = await render(
-      <ProjectPlanning projectRef={projectRef} archived={false} />,
+      <ProjectPlanning projectRef={projectRef} projectTitle="Test project" archived={false} />,
       { router: "/workspace/environment-1/project-1" },
     );
     await vi.waitFor(() => expect(mocks.command).toHaveBeenCalled());

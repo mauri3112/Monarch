@@ -7,6 +7,7 @@ import * as OrchestrationCommandReceipts from "../persistence/OrchestrationComma
 import * as OrchestrationEventStore from "../persistence/OrchestrationEventStore.ts";
 import * as McpAppModelContext from "../mcpApps/McpAppModelContext.ts";
 import * as Monarch from "../monarch/MonarchService.ts";
+import * as MonarchContext from "../monarch/MonarchContextService.ts";
 import * as PreviewAgentActivity from "../preview/PreviewAgentActivity.ts";
 import * as McpAppRequests from "../mcpApps/McpAppRequests.ts";
 import * as ProviderSessionRuntime from "../persistence/ProviderSessionRuntime.ts";
@@ -155,6 +156,7 @@ const layerRunExecutionServiceProvided = RunExecutionService.layer.pipe(
     Layer.mergeAll(
       McpAppModelContext.layer,
       Monarch.layer,
+      MonarchContext.layer,
       PreviewAgentActivity.layer,
       layerCheckpointServiceProvided,
       layerEventSink,

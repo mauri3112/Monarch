@@ -21,9 +21,13 @@ import { ProjectReviewSchedules } from "./ProjectReviewSchedules";
 export function ProjectSchedules({
   projectRef,
   archived,
+  suggestionEditor,
+  onSuggestionEditorChange,
 }: {
   projectRef: ScopedProjectRef;
   archived: boolean;
+  suggestionEditor: MonarchReviewSchedule | "new" | null;
+  onSuggestionEditorChange: (editor: MonarchReviewSchedule | "new" | null) => void;
 }) {
   const navigate = useNavigate();
   const query = useEnvironmentQuery(
@@ -43,9 +47,6 @@ export function ProjectSchedules({
   });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [suggestionEditor, setSuggestionEditor] = useState<MonarchReviewSchedule | "new" | null>(
-    null,
-  );
   const tasks = (query.data?.tasks ?? []).filter((task) => task.projectId === projectRef.projectId);
 
   const edit = (task?: ScheduledTask) =>
@@ -89,7 +90,9 @@ export function ProjectSchedules({
           </MenuTrigger>
           <MenuPopup align="end">
             <MenuItem onClick={() => edit()}>Run a prompt</MenuItem>
-            <MenuItem onClick={() => setSuggestionEditor("new")}>Suggest next threads</MenuItem>
+            <MenuItem onClick={() => onSuggestionEditorChange("new")}>
+              Suggest next threads
+            </MenuItem>
           </MenuPopup>
         </Menu>
       </div>
@@ -115,7 +118,7 @@ export function ProjectSchedules({
         projectRef={projectRef}
         archived={archived}
         editor={suggestionEditor}
-        onEditorChange={setSuggestionEditor}
+        onEditorChange={onSuggestionEditorChange}
         showEmpty={query.data !== undefined && tasks.length === 0}
       />
       {tasks.length > 0 ? (

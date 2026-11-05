@@ -41,6 +41,7 @@ jobs:
           vp test run --config ../../vite.config.ts
           src/cliRelease.test.ts src/devHome.test.ts src/desktopAppControl.test.ts
           src/promptLinks.test.ts src/providerAuthReturnUrl.test.ts src/otelEnvironment.test.ts
+          src/monarchContext.test.ts
       - name: Check desktop profile and launcher isolation
         working-directory: apps/desktop
         run: >-
@@ -80,10 +81,11 @@ jobs:
       - name: Check client permissions
         working-directory: packages/client-runtime
         run: vp test run src/state/commandPermissions.test.ts
-      - name: Check project planning and reviews
+      - name: Check project context, planning, and updates
         working-directory: apps/server
         run: >-
-          vp test run src/monarch/MonarchService.test.ts src/monarch/MonarchScheduler.test.ts
+          vp test run src/monarch/MonarchService.test.ts src/monarch/MonarchContextService.test.ts
+          src/monarch/MonarchScheduler.test.ts src/monarch/ReviewContextBudget.test.ts
           src/mcp/toolkits/monarch/handlers.test.ts src/provider/AgentContextBudget.test.ts
           src/textGeneration/CodexTextGeneration.test.ts src/orchestration-v2/RunExecutionService.test.ts
       - name: Check project workspace and voice client

@@ -1,4 +1,5 @@
 import * as Monarch from "./monarch/MonarchService.ts";
+import * as MonarchContext from "./monarch/MonarchContextService.ts";
 import * as MonarchSchedules from "./monarch/MonarchScheduler.ts";
 import * as SecretResolver from "@t3tools/secret-provider-core/server/SecretResolver";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -711,6 +712,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ReviewService.ReviewService)({}),
   Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
   Layer.mock(Monarch.MonarchService)({}),
+  Layer.mock(MonarchContext.MonarchContextService)({}),
   Layer.mock(MonarchSchedules.MonarchScheduler)({}),
   Layer.mock(SecretRequests.SecretRequests)({}),
   Layer.mock(SecretResolver.SecretResolver)({}),

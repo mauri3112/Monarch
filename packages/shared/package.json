@@ -3,6 +3,10 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./monarchContext": {
+      "types": "./src/monarchContext.ts",
+      "import": "./src/monarchContext.ts"
+    },
     "./changedFileKind": {
       "types": "./src/changedFileKind.ts",
       "import": "./src/changedFileKind.ts"

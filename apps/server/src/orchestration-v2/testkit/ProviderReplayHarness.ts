@@ -56,6 +56,7 @@ import * as ProviderTurnStartService from "../ProviderTurnStartService.ts";
 import * as ProviderTurnStartServiceTestkit from "../ProviderTurnStartService.testkit.ts";
 import * as McpAppModelContext from "../../mcpApps/McpAppModelContext.ts";
 import * as Monarch from "../../monarch/MonarchService.ts";
+import * as MonarchContext from "../../monarch/MonarchContextService.ts";
 import * as PreviewAgentActivity from "../../preview/PreviewAgentActivity.ts";
 import * as RunExecutionService from "../RunExecutionService.ts";
 import * as RunFinalizationService from "../RunFinalizationService.ts";
@@ -406,6 +407,10 @@ export function layerWithRegistry<Error>(
         McpAppModelContext.layerEmpty,
         Layer.mock(Monarch.MonarchService)({
           list: () => Effect.succeed({ targets: [], suggestions: [], hasMoreHistory: false }),
+        }),
+        Layer.mock(MonarchContext.MonarchContextService)({
+          brief: ({ projectId }) =>
+            Effect.succeed({ projectId, revision: 0, text: "", entryIds: [], truncated: false }),
         }),
         PreviewAgentActivity.layer,
         layerCheckpointServiceProvided,

@@ -2,6 +2,7 @@ import * as Schema from "effect/Schema";
 import { ModelSelection } from "./modelSelection.ts";
 import {
   IsoDateTime,
+  NonNegativeInt,
   PositiveInt,
   ProjectId,
   ThreadId,
@@ -67,6 +68,7 @@ export const NextThreadSuggestion = Schema.Struct({
   draftThreadId: Schema.NullOr(ThreadId),
   modelSelection: Schema.optionalKey(ModelSelection),
   sourceRunId: Schema.optionalKey(EntityId),
+  contextRevision: Schema.optionalKey(NonNegativeInt),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -77,6 +79,7 @@ export const MonarchCreateSuggestionInput = Schema.Struct({
   dedupeKey: Schema.optionalKey(EntityId),
   modelSelection: Schema.optionalKey(ModelSelection),
   sourceRunId: Schema.optionalKey(EntityId),
+  contextRevision: Schema.optionalKey(NonNegativeInt),
 });
 export type MonarchCreateSuggestionInput = typeof MonarchCreateSuggestionInput.Type;
 const SuggestionMutation = { projectId: ProjectId, id: EntityId, expectedRevision: PositiveInt };
@@ -87,6 +90,7 @@ export const MonarchUpdateSuggestionInput = Schema.Struct({
   title: Title,
   prompt: SuggestionFields.prompt,
   targets: Schema.optionalKey(SuggestionFields.targets),
+  contextRevision: Schema.optionalKey(NonNegativeInt),
 });
 export type MonarchUpdateSuggestionInput = typeof MonarchUpdateSuggestionInput.Type;
 export const MonarchSetSuggestionStatusInput = Schema.Struct({

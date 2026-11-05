@@ -4,6 +4,8 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  RunId,
+  TextGenerationError,
   type MonarchScheduleIdentity,
 } from "@t3tools/contracts";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
@@ -26,13 +28,15 @@ import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as MonarchService from "./MonarchService.ts";
 import * as MonarchScheduler from "./MonarchScheduler.ts";
+import * as MonarchContextService from "./MonarchContextService.ts";
 
 const projectId = ProjectId.make("review-fixture");
 const modelSelection = { instanceId: ProviderInstanceId.make("codex"), model: "test-model" };
 const at = "2026-11-05T00:00:00.000Z";
 const encodeRun = Schema.encodeEffect(Schema.fromJsonString(MonarchScheduleRun));
+const encodeJson = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 
-const base = MonarchService.layer.pipe(
+const base = Layer.mergeAll(MonarchService.layer, MonarchContextService.layer).pipe(
   Layer.provideMerge(SqlitePersistence.layerMemory),
   Layer.provideMerge(SecureRandom.layerWebCrypto),
   Layer.provideMerge(Digest.layerWebCrypto),
@@ -40,12 +44,15 @@ const base = MonarchService.layer.pipe(
 
 const fixture = Effect.fn("MonarchSchedulerTest.fixture")(function* (
   invoke: NonNullable<ProviderTextGeneration["generateProjectSuggestions"]>,
+  extract: NonNullable<ProviderTextGeneration["generateProjectContext"]> = () =>
+    Effect.succeed({ entries: [] }),
 ) {
   yield* TestClock.setTime(Date.parse(at));
   const sql = yield* SqlClient.SqlClient;
   yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at)
     VALUES (${projectId}, 'Synthetic project', '/tmp/monarch-review-fixture', '[]', ${at}, ${at})`;
   const monarch = yield* MonarchService.MonarchService;
+  const context = yield* MonarchContextService.MonarchContextService;
   const target = yield* monarch.createTarget({
     projectId,
     title: "Reproducible analysis",
@@ -68,7 +75,7 @@ const fixture = Effect.fn("MonarchSchedulerTest.fixture")(function* (
   const registry = Layer.mock(ProviderInstanceRegistry.ProviderInstanceRegistry)({
     getInstance: () =>
       Effect.succeed({
-        textGeneration: { generateProjectSuggestions: invoke },
+        textGeneration: { generateProjectSuggestions: invoke, generateProjectContext: extract },
         snapshot: {
           getSnapshot: Effect.succeed({
             driver: "codex",
@@ -91,7 +98,7 @@ const fixture = Effect.fn("MonarchSchedulerTest.fixture")(function* (
     ),
   );
   const tick = Ref.get(tickRef).pipe(Effect.flatMap((work) => work));
-  return { sql, monarch, target, layer, tick };
+  return { sql, monarch, context, target, layer, tick };
 });
 
 const create = (service: MonarchScheduler.MonarchScheduler["Service"]) =>
@@ -116,6 +123,499 @@ const waitForCompletion = (
     ),
     Stream.runHead,
   );
+
+const completedEvidence = Effect.fn("MonarchSchedulerTest.completedEvidence")(function* (
+  suffix: string,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const threadId = ThreadId.make(`source-${suffix}`);
+  const runId = RunId.make(`run-${suffix}`);
+  const payload = yield* encodeJson({
+    id: runId,
+    status: "completed",
+    workspacePreparation: { branch: "feature", worktreePath: "/tmp/monarch-review-fixture" },
+  });
+  yield* sql`INSERT INTO orchestration_v2_projection_threads(thread_id,project_id,title,default_provider,runtime_mode,interaction_mode,created_at,updated_at,payload_json)
+    VALUES(${threadId},${projectId},${suffix},'codex','approval-required','default',${at},${at},'{"branch":"feature"}')`;
+  yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,completed_at,payload_json)
+    VALUES(${runId},${threadId},1,'codex','completed',${at},${at},${payload})`;
+  yield* sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,run_id,role,streaming,created_at,updated_at,payload_json)
+    VALUES(${`message-${suffix}`},${threadId},${runId},'assistant',0,${at},${at},${yield* encodeJson({ text: `Reported implementation outcome ${suffix}. Tests are not independently verified.` })})`;
+  yield* sql`INSERT INTO orchestration_events(event_id,aggregate_kind,stream_id,stream_version,event_type,occurred_at,actor_kind,payload_json,metadata_json,application_event_version)
+    VALUES(${`event-${suffix}`},'thread',${threadId},0,'run.updated',${at},'system',${payload},'{}',2)`;
+  return { threadId, runId };
+});
+
+const waitForActivity = (service: MonarchScheduler.MonarchScheduler["Service"], count: number) =>
+  service.watchActivity({ projectId }).pipe(
+    Stream.filter(
+      (state) => state.runs.length >= count && state.runs.every((run) => run.status !== "running"),
+    ),
+    Stream.runHead,
+  );
+
+it.effect(
+  "reacts once to persisted work and Target revisions, defers active work, and applies context before suggestions",
+  () =>
+    Effect.gen(function* () {
+      const extracts = yield* Ref.make(0);
+      const suggestions = yield* Ref.make(0);
+      let targetId = "";
+      let source: { threadId: ThreadId; runId: RunId } | undefined;
+      const f = yield* fixture(
+        (input) =>
+          Effect.gen(function* () {
+            yield* Ref.update(suggestions, (n) => n + 1);
+            assert.include(input.context, "Captured branch outcome");
+            return {
+              suggestions: [
+                {
+                  title: "Verify branch outcome",
+                  prompt: "Verify the reported branch implementation.",
+                  rationale: "The branch work remains reported.",
+                  targetIds: [targetId],
+                  sourceThreadIds: [source!.threadId],
+                },
+              ],
+            };
+          }),
+        () =>
+          Effect.gen(function* () {
+            yield* Ref.update(extracts, (n) => n + 1);
+            return {
+              entries: [
+                {
+                  kind: "outcome" as const,
+                  title: "Captured branch outcome",
+                  body: "An implementation was reported on the feature branch.",
+                  scope: "branch" as const,
+                  branch: "feature",
+                  sourceRefs: [source!],
+                  contradictsEntryIds: [],
+                },
+              ],
+            };
+          }),
+      );
+      targetId = f.target.id;
+      yield* completedEvidence("before-opt-in");
+      const initial = yield* f.context.get({ projectId });
+      yield* f.context.updateSettings({
+        projectId,
+        expectedRevision: initial.revision,
+        settings: { ...initial.settings, enabled: true, modelSelection },
+      });
+      yield* Effect.gen(function* () {
+        const service = yield* MonarchScheduler.MonarchScheduler;
+        yield* f.tick;
+        assert.equal(yield* Ref.get(extracts), 0);
+        source = yield* completedEvidence("after-opt-in");
+        const deleted = yield* completedEvidence("deleted-cohort");
+        const active = yield* completedEvidence("active-cohort");
+        yield* f.sql`UPDATE orchestration_v2_projection_runs SET status='running' WHERE run_id=${active.runId}`;
+        yield* f.tick;
+        assert.equal((yield* service.activity({ projectId })).blockedReason, "active-work");
+        assert.equal(yield* Ref.get(extracts), 0);
+        yield* f.sql`UPDATE orchestration_v2_projection_threads SET deleted_at=${at} WHERE thread_id=${deleted.threadId}`;
+        yield* f.sql`UPDATE orchestration_v2_projection_runs SET status='cancelled' WHERE run_id=${active.runId}`;
+        yield* f.tick;
+        yield* waitForActivity(service, 1);
+        assert.equal(yield* Ref.get(extracts), 1);
+        assert.equal(yield* Ref.get(suggestions), 1);
+        const activity = yield* service.activity({ projectId });
+        assert.equal(activity.runs[0]!.trigger, "work-completed");
+        assert.equal(activity.runs[0]!.contextEntryIds?.length, 1);
+        assert.equal((yield* f.context.get({ projectId })).entries[0]!.evidence, "reported");
+        yield* f.tick;
+        assert.equal(yield* Ref.get(extracts), 1);
+        assert.equal((yield* service.activity({ projectId })).runs.length, 1);
+        yield* f.sql`INSERT INTO orchestration_events(event_id,aggregate_kind,stream_id,stream_version,event_type,occurred_at,actor_kind,payload_json,metadata_json,application_event_version)
+          SELECT 'redelivered-completion','thread',${source.threadId},1,'run.updated',${at},'system',payload_json,'{}',2
+          FROM orchestration_v2_projection_runs WHERE run_id=${source.runId}`;
+        yield* f.tick;
+        assert.equal((yield* service.activity({ projectId })).runs.length, 1);
+        yield* f.monarch.updateTarget({
+          ...f.target,
+          expectedRevision: f.target.revision,
+          description: "A revised active direction.",
+        });
+        yield* f.tick;
+        yield* waitForActivity(service, 2);
+        assert.equal(yield* Ref.get(extracts), 1);
+        assert.equal(yield* Ref.get(suggestions), 2);
+      }).pipe(Effect.provide(f.layer));
+      yield* Effect.gen(function* () {
+        yield* f.tick;
+        assert.equal(yield* Ref.get(extracts), 1);
+        assert.equal(yield* Ref.get(suggestions), 2);
+      }).pipe(Effect.provide(Layer.fresh(f.layer)));
+    }).pipe(Effect.provide(base)),
+);
+
+it.effect(
+  "allows explicit context-only builds while automatic updates are off and enforces pause and daily limits",
+  () =>
+    Effect.gen(function* () {
+      const calls = yield* Ref.make(0);
+      const f = yield* fixture(
+        () => Effect.die("Context-only builds must not generate suggestions"),
+        () => Ref.update(calls, (n) => n + 1).pipe(Effect.as({ entries: [] })),
+      );
+      yield* completedEvidence("manual-build");
+      const initial = yield* f.context.get({ projectId });
+      let state = yield* f.context.updateSettings({
+        projectId,
+        expectedRevision: initial.revision,
+        settings: { ...initial.settings, modelSelection, maxUpdatesPerDay: 1, paused: true },
+      });
+      yield* Effect.gen(function* () {
+        const service = yield* MonarchScheduler.MonarchScheduler;
+        yield* service.refresh({ projectId, mode: "build-context" });
+        yield* f.tick;
+        assert.equal(yield* Ref.get(calls), 0);
+        assert.equal((yield* service.activity({ projectId })).blockedReason, "paused");
+        state = yield* f.context.updateSettings({
+          projectId,
+          expectedRevision: state.revision,
+          settings: { ...state.settings, paused: false },
+        });
+        yield* f.tick;
+        yield* waitForActivity(service, 1);
+        assert.equal(yield* Ref.get(calls), 1);
+        assert.equal((yield* service.activity({ projectId })).runs[0]!.trigger, "build-context");
+        assert.deepEqual((yield* service.list({ projectId })).schedules, []);
+        yield* service.refresh({ projectId, mode: "retry" });
+        yield* f.tick;
+        assert.equal((yield* service.activity({ projectId })).blockedReason, "daily-limit");
+        assert.equal((yield* service.activity({ projectId })).updatesToday, 1);
+        yield* TestClock.adjust("1 day");
+        yield* f.tick;
+        yield* waitForActivity(service, 2);
+        assert.equal(yield* Ref.get(calls), 1);
+        assert.equal((yield* service.activity({ projectId })).pending, false);
+      }).pipe(Effect.provide(f.layer));
+    }).pipe(Effect.provide(base)),
+);
+
+it.effect(
+  "preserves combined Target/work causes and does not loop over sources excluded after queueing",
+  () =>
+    Effect.gen(function* () {
+      const captures = yield* Ref.make(0);
+      const suggestions = yield* Ref.make(0);
+      const f = yield* fixture(
+        () => Ref.update(suggestions, (n) => n + 1).pipe(Effect.as({ suggestions: [] })),
+        () => Ref.update(captures, (n) => n + 1).pipe(Effect.as({ entries: [] })),
+      );
+      const initial = yield* f.context.get({ projectId });
+      let state = yield* f.context.updateSettings({
+        projectId,
+        expectedRevision: initial.revision,
+        settings: {
+          ...initial.settings,
+          enabled: true,
+          modelSelection,
+          paused: true,
+          suggestAfterWork: false,
+        },
+      });
+      yield* Effect.gen(function* () {
+        const service = yield* MonarchScheduler.MonarchScheduler;
+        yield* f.tick;
+        const evidence = yield* completedEvidence("excluded-after-queue");
+        yield* f.monarch.updateTarget({
+          ...f.target,
+          expectedRevision: 1,
+          title: "Changed target",
+        });
+        yield* f.tick;
+        assert.equal((yield* service.activity({ projectId })).pending, true);
+        state = yield* f.context.updateSettings({
+          projectId,
+          expectedRevision: state.revision,
+          settings: { ...state.settings, paused: false, excludedThreadIds: [evidence.threadId] },
+        });
+        yield* f.tick;
+        yield* waitForActivity(service, 1);
+        assert.equal(yield* Ref.get(captures), 0);
+        assert.equal(yield* Ref.get(suggestions), 1);
+        assert.equal((yield* service.activity({ projectId })).runs[0]!.trigger, "project-changed");
+        yield* f.tick;
+        assert.equal((yield* service.activity({ projectId })).runs.length, 1);
+        assert.equal((yield* service.activity({ projectId })).pending, false);
+      }).pipe(Effect.provide(f.layer));
+    }).pipe(Effect.provide(base)),
+);
+
+it.effect(
+  "retains applied context and its activity provenance when suggestions fail, then retries without recapturing",
+  () =>
+    Effect.gen(function* () {
+      const extracts = yield* Ref.make(0);
+      const attempts = yield* Ref.make(0);
+      let source: { threadId: ThreadId; runId: RunId } | undefined;
+      const f = yield* fixture(
+        () =>
+          Effect.gen(function* () {
+            const attempt = yield* Ref.updateAndGet(attempts, (n) => n + 1);
+            if (attempt === 1)
+              return yield* new TextGenerationError({
+                operation: "test",
+                detail: "Synthetic provider failure",
+              });
+            return { suggestions: [] };
+          }),
+        () =>
+          Ref.update(extracts, (n) => n + 1).pipe(
+            Effect.as({
+              entries: [
+                {
+                  kind: "outcome" as const,
+                  title: "Reported storage change",
+                  body: "Storage changed on the branch; no independent checks recorded.",
+                  scope: "branch" as const,
+                  branch: "feature",
+                  sourceRefs: [source!],
+                  contradictsEntryIds: [],
+                },
+              ],
+            }),
+          ),
+      );
+      source = yield* completedEvidence("partial-context");
+      const initial = yield* f.context.get({ projectId });
+      yield* f.context.updateSettings({
+        projectId,
+        expectedRevision: initial.revision,
+        settings: { ...initial.settings, modelSelection },
+      });
+      yield* Effect.gen(function* () {
+        const service = yield* MonarchScheduler.MonarchScheduler;
+        yield* service.refresh({ projectId, mode: "refresh" });
+        yield* f.tick;
+        yield* waitForActivity(service, 1);
+        const failed = yield* service.activity({ projectId });
+        assert.equal(failed.blockedReason, "failed");
+        assert.equal(failed.runs[0]!.status, "failed");
+        assert.equal(failed.runs[0]!.contextEntryIds?.length, 1);
+        assert.equal((yield* f.context.get({ projectId })).entries.length, 1);
+        yield* f.tick;
+        assert.equal(yield* Ref.get(attempts), 1);
+        yield* service.refresh({ projectId, mode: "retry" });
+        yield* f.tick;
+        yield* waitForActivity(service, 2);
+        assert.equal(yield* Ref.get(extracts), 1);
+        assert.equal(yield* Ref.get(attempts), 2);
+        const completed = yield* service.activity({ projectId });
+        assert.equal(completed.pending, false);
+        assert.equal(completed.updatesToday, 2);
+      }).pipe(Effect.provide(f.layer));
+    }).pipe(Effect.provide(base)),
+);
+
+it.effect(
+  "rejects context extraction across a Target revision and leaves its evidence available for explicit retry",
+  () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let source: { threadId: ThreadId; runId: RunId } | undefined;
+      const f = yield* fixture(
+        () => Effect.die("Build context must not suggest"),
+        () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(entered, undefined);
+            yield* Deferred.await(release);
+            return {
+              entries: [
+                {
+                  kind: "outcome" as const,
+                  title: "A captured result",
+                  body: "A reported feature-branch outcome.",
+                  scope: "branch" as const,
+                  branch: "feature",
+                  sourceRefs: [source!],
+                  contradictsEntryIds: [],
+                },
+              ],
+            };
+          }),
+      );
+      source = yield* completedEvidence("stale-target");
+      const initial = yield* f.context.get({ projectId });
+      yield* f.context.updateSettings({
+        projectId,
+        expectedRevision: initial.revision,
+        settings: { ...initial.settings, modelSelection },
+      });
+      yield* Effect.gen(function* () {
+        const service = yield* MonarchScheduler.MonarchScheduler;
+        yield* service.refresh({ projectId, mode: "build-context" });
+        yield* f.tick;
+        yield* Deferred.await(entered);
+        yield* f.monarch.updateTarget({
+          ...f.target,
+          expectedRevision: f.target.revision,
+          description: "New direction during inference.",
+        });
+        yield* Deferred.succeed(release, undefined);
+        yield* waitForActivity(service, 1);
+        assert.deepEqual((yield* f.context.get({ projectId })).entries, []);
+        assert.equal((yield* service.activity({ projectId })).runs[0]!.status, "failed");
+        assert.equal(
+          (yield* f.sql<{
+            captured: number;
+          }>`SELECT captured FROM monarch_continuity_sources WHERE run_id=${source!.runId}`)[0]
+            ?.captured,
+          0,
+        );
+        yield* service.refresh({ projectId, mode: "retry" });
+        yield* f.tick;
+        yield* waitForActivity(service, 2);
+        assert.equal((yield* f.context.get({ projectId })).entries.length, 1);
+      }).pipe(Effect.provide(f.layer));
+    }).pipe(Effect.provide(base)),
+);
+
+it.effect(
+  "pausing during suggestion inference prevents stale suggestions from being committed",
+  () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      let targetId = "";
+      const f = yield* fixture(() =>
+        Effect.gen(function* () {
+          yield* Deferred.succeed(entered, undefined);
+          yield* Deferred.await(release);
+          return {
+            suggestions: [
+              {
+                title: "A proposed next step",
+                prompt: "Inspect the current implementation before changing it.",
+                rationale: "Supports the active Target.",
+                targetIds: [targetId],
+                sourceThreadIds: [],
+              },
+            ],
+          };
+        }),
+      );
+      targetId = f.target.id;
+      yield* Effect.gen(function* () {
+        const service = yield* MonarchScheduler.MonarchScheduler;
+        const schedule = yield* create(service);
+        yield* service.runNow(schedule);
+        yield* Deferred.await(entered);
+        const current = yield* f.context.get({ projectId });
+        const paused = yield* f.context.updateSettings({
+          projectId,
+          expectedRevision: current.revision,
+          settings: { ...current.settings, paused: true },
+        });
+        yield* Deferred.succeed(release, undefined);
+        yield* waitForCompletion(service, schedule);
+        assert.deepEqual((yield* f.monarch.list({ projectId })).suggestions, []);
+        assert.equal((yield* service.history(schedule)).runs[0]!.status, "failed");
+        assert.equal((yield* service.runNow(schedule).pipe(Effect.flip)).reason, "paused");
+        yield* f.context.updateSettings({
+          projectId,
+          expectedRevision: paused.revision,
+          settings: { ...paused.settings, paused: false },
+        });
+        yield* service.runNow(schedule);
+        yield* waitForCompletion(service, schedule);
+        assert.equal((yield* f.monarch.list({ projectId })).suggestions.length, 1);
+      }).pipe(Effect.provide(f.layer));
+    }).pipe(Effect.provide(base)),
+);
+
+it.effect(
+  "retires an entire suggestion-only backlog atomically while preserving later arrivals and explicit builds",
+  () =>
+    Effect.gen(function* () {
+      const entered = yield* Deferred.make<void>();
+      const release = yield* Deferred.make<void>();
+      const capturedInputs = yield* Ref.make<ReadonlyArray<string>>([]);
+      const f = yield* fixture(
+        () =>
+          Effect.gen(function* () {
+            yield* Deferred.succeed(entered, undefined);
+            yield* Deferred.await(release);
+            return { suggestions: [] };
+          }),
+        (input) =>
+          Ref.update(capturedInputs, (inputs) => [...inputs, input.context]).pipe(
+            Effect.as({ entries: [] }),
+          ),
+      );
+      const initial = yield* f.context.get({ projectId });
+      let state = yield* f.context.updateSettings({
+        projectId,
+        expectedRevision: initial.revision,
+        settings: { ...initial.settings, enabled: true, modelSelection, autoUpdateContext: false },
+      });
+      yield* Effect.gen(function* () {
+        const service = yield* MonarchScheduler.MonarchScheduler;
+        yield* f.tick;
+        for (let index = 0; index < 25; index++)
+          yield* completedEvidence(`ignored-${String(index).padStart(2, "0")}`);
+        yield* f.tick;
+        yield* Deferred.await(entered);
+        assert.equal(
+          (yield* f.sql<{
+            count: number;
+          }>`SELECT COUNT(*) AS count FROM monarch_continuity_sources WHERE project_id=${projectId} AND captured=2`)[0]
+            ?.count,
+          25,
+        );
+        const late = yield* completedEvidence("later-arrival");
+        yield* f.tick;
+        assert.equal(
+          (yield* f.sql<{
+            captured: number;
+          }>`SELECT captured FROM monarch_continuity_sources WHERE run_id=${late.runId}`)[0]
+            ?.captured,
+          0,
+        );
+        yield* Deferred.succeed(release, undefined);
+        yield* waitForActivity(service, 1);
+        yield* f.tick;
+        yield* waitForActivity(service, 2);
+        assert.equal(
+          (yield* f.sql<{
+            captured: number;
+          }>`SELECT captured FROM monarch_continuity_sources WHERE run_id=${late.runId}`)[0]
+            ?.captured,
+          2,
+        );
+        state = yield* f.context.updateSettings({
+          projectId,
+          expectedRevision: state.revision,
+          settings: { ...state.settings, autoUpdateContext: true },
+        });
+        yield* completedEvidence("new-capture");
+        yield* f.tick;
+        yield* waitForActivity(service, 3);
+        const inputs = yield* Ref.get(capturedInputs);
+        assert.equal(inputs.length, 1);
+        assert.include(inputs[0]!, "new-capture");
+        assert.notInclude(inputs[0]!, "ignored-");
+        assert.notInclude(inputs[0]!, "later-arrival");
+        yield* service.refresh({ projectId, mode: "build-context", threadIds: [late.threadId] });
+        yield* f.tick;
+        yield* waitForActivity(service, 4);
+        assert.equal((yield* Ref.get(capturedInputs)).length, 2);
+        assert.equal(
+          (yield* f.sql<{
+            captured: number;
+          }>`SELECT captured FROM monarch_continuity_sources WHERE run_id=${late.runId}`)[0]
+            ?.captured,
+          1,
+        );
+      }).pipe(Effect.provide(f.layer));
+    }).pipe(Effect.provide(base)),
+);
 
 it.effect(
   "persists due work, prevents overlapping claims, and produces suggestions without starting a thread",
@@ -149,7 +649,7 @@ it.effect(
         VALUES ('completed-source', ${projectId}, 'Prepare ingestion', 'codex', 'approval-required', 'default', ${at}, ${at}, '{}')`;
       yield* f.sql`INSERT INTO orchestration_v2_projection_runs
         (run_id, thread_id, ordinal, provider, status, requested_at, completed_at, payload_json)
-        VALUES ('completed-run', 'completed-source', 1, 'codex', 'completed', ${at}, ${at}, '{}')`;
+        VALUES ('completed-run', 'completed-source', 1, 'codex', 'completed', ${at}, ${at}, '{"workspacePreparation":{"branch":"feature"}}')`;
       yield* f.sql`INSERT INTO orchestration_v2_projection_messages
         (message_id, thread_id, run_id, role, streaming, created_at, updated_at, payload_json)
         VALUES ('reply', 'completed-source', 'completed-run', 'assistant', 0, ${at}, ${at}, '{"text":"Ingestion exists but its input manifest remains undocumented."}')`;
@@ -359,7 +859,7 @@ it.effect("limits simultaneous inference and does not resurrect dismissed sugges
     const f = yield* fixture(() =>
       Effect.gen(function* () {
         const count = yield* Ref.updateAndGet(calls, (n) => n + 1);
-        if (count === 2) yield* Deferred.succeed(entered, undefined);
+        if (count === 1) yield* Deferred.succeed(entered, undefined);
         yield* Deferred.await(release);
         return {
           suggestions: [
@@ -381,14 +881,14 @@ it.effect("limits simultaneous inference and does not resurrect dismissed sugges
       const second = yield* create(service);
       const third = yield* create(service);
       yield* service.runNow(first);
-      yield* service.runNow(second);
+      assert.equal((yield* service.runNow(second).pipe(Effect.flip)).reason, "busy");
       yield* Deferred.await(entered);
       assert.equal((yield* service.runNow(third).pipe(Effect.flip)).reason, "busy");
       const waitFirst = yield* waitForCompletion(service, first).pipe(Effect.forkChild);
-      const waitSecond = yield* waitForCompletion(service, second).pipe(Effect.forkChild);
       yield* Deferred.succeed(release, undefined);
       yield* Fiber.join(waitFirst);
-      yield* Fiber.join(waitSecond);
+      yield* service.runNow(second);
+      yield* waitForCompletion(service, second);
       const suggestions = (yield* f.monarch.list({ projectId })).suggestions;
       assert.equal(suggestions.length, 1);
       const suggestion = suggestions[0]!;
@@ -418,7 +918,7 @@ it.effect("times out a stuck provider and releases its durable run claim", () =>
       yield* service.runNow(schedule);
       yield* Deferred.await(entered);
       const completion = yield* waitForCompletion(service, schedule).pipe(Effect.forkChild);
-      yield* TestClock.adjust("4 minutes");
+      yield* TestClock.adjust("8 minutes");
       yield* Fiber.join(completion);
       assert.equal((yield* service.history(schedule)).runs[0]!.status, "failed");
       const [row] = yield* f.sql<{

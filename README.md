@@ -16,7 +16,11 @@ A suggestion task can run daily or weekly in a selected timezone, at an interval
 
 Suggested next threads show their reasoning, related Targets, and source conversations. **Use** opens an editable draft and leaves sending to you. Reopening that suggestion keeps your draft edits. **Edit** changes the proposed prompt; **Remove** puts it in removed history, where it can be restored. A Target change makes an older suggestion stale until you review its relationship to the new direction. Once you send the draft, its suggestion links to the resulting thread.
 
-Targets, review schedules, run history, and suggestions persist locally. The private plugin's data is not imported automatically.
+Open **Project context** beside the project title to write a brief and retain architecture notes, decisions, questions, and outcomes. Generated entries cite their source conversations and remain **Reported** until you confirm them. Branch-specific work stays scoped to its branch. You can edit, pin, remove, and restore entries; automatic updates preserve your decisions. The relevant context accompanies subsequent conversations across providers without changing your written prompt.
+
+Open **Settings** beside **Suggested next threads** to choose a Codex or Claude model and enable updates after completed work or Target changes. Automatic updates start off. **Build context** can read selected existing conversations first; **Refresh now** requests an update. Settings include exclusions, pause, instructions, daily update limits, and a cap on open suggestions. Activity shows queued work, failures, and retries. An update can make two model requests, one for context and one for suggestions. Timed refreshes use the existing scheduled suggestion tasks. Suggestions remain drafts for you to review and send.
+
+Targets, project context, settings, schedules, run history, and suggestions persist locally. The private plugin's data is not imported automatically.
 
 ## Run from source
 

@@ -276,6 +276,8 @@ export const makeManagedCodexProvider = Effect.fn("makeManagedCodexProvider")(fu
   const textGeneration: ProviderInstance["textGeneration"] = {
     generateProjectSuggestions: (value) =>
       protect("generateProjectSuggestions", nativeGeneration.generateProjectSuggestions!(value)),
+    generateProjectContext: (value) =>
+      protect("generateProjectContext", nativeGeneration.generateProjectContext!(value)),
     generateCommitMessage: (value) =>
       protect("generateCommitMessage", nativeGeneration.generateCommitMessage(value)),
     generatePrContent: (value) =>

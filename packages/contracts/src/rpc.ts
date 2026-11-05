@@ -1,4 +1,18 @@
 import {
+  MonarchContextProjectInput,
+  MonarchContextState,
+  MonarchContextUpdateSettingsInput,
+  MonarchContextUpsertEntryInput,
+  MonarchContextEntryInput,
+  MonarchContextRestoreEntryInput,
+  MonarchContextEntry,
+  MonarchContextHistoryInput,
+  MonarchContextHistory,
+  MonarchContextBriefInput,
+  MonarchContextBrief,
+  MonarchContextError,
+} from "./monarchContext.ts";
+import {
   MonarchSchedulesListInput,
   MonarchSchedulesListResult,
   MonarchSchedulesUpsertInput,
@@ -7,6 +21,10 @@ import {
   MonarchScheduleIdentity,
   MonarchSchedulesRunNowResult,
   MonarchSchedulesHistoryResult,
+  MonarchProjectRefreshInput,
+  MonarchProjectRefreshResult,
+  MonarchProjectActivityResult,
+  MonarchProjectSourcesResult,
   MonarchReviewSchedule,
   MonarchScheduleError,
 } from "./monarchSchedules.ts";
@@ -441,6 +459,18 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  monarchContinuityRefresh: "monarch.continuity.refresh",
+  monarchContinuityActivity: "monarch.continuity.activity",
+  monarchContinuitySubscribe: "monarch.continuity.subscribe",
+  monarchContinuitySources: "monarch.continuity.sources",
+  monarchContextGet: "monarch.context.get",
+  monarchContextSubscribe: "monarch.context.subscribe",
+  monarchContextUpdateSettings: "monarch.context.updateSettings",
+  monarchContextUpsertEntry: "monarch.context.upsertEntry",
+  monarchContextRemoveEntry: "monarch.context.removeEntry",
+  monarchContextRestoreEntry: "monarch.context.restoreEntry",
+  monarchContextHistory: "monarch.context.history",
+  monarchContextBrief: "monarch.context.brief",
   monarchSchedulesList: "monarch.schedules.list",
   monarchSchedulesSubscribe: "monarch.schedules.subscribe",
   monarchSchedulesUpsert: "monarch.schedules.upsert",
@@ -729,6 +759,69 @@ const WsProviderConsumeResetCreditRpc = Rpc.make(WS_METHODS.providerConsumeReset
   payload: ProviderConsumeResetCreditInput,
   success: ProviderConsumeResetCreditResult,
   error: Schema.Union([ProviderSetupError, UsageLimitSourceError, EnvironmentAuthorizationError]),
+});
+
+const WsMonarchContinuityRefreshRpc = Rpc.make(WS_METHODS.monarchContinuityRefresh, {
+  payload: MonarchProjectRefreshInput,
+  success: MonarchProjectRefreshResult,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+const WsMonarchContinuityActivityRpc = Rpc.make(WS_METHODS.monarchContinuityActivity, {
+  payload: MonarchContextProjectInput,
+  success: MonarchProjectActivityResult,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+const WsMonarchContinuitySubscribeRpc = Rpc.make(WS_METHODS.monarchContinuitySubscribe, {
+  payload: MonarchContextProjectInput,
+  success: MonarchProjectActivityResult,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsMonarchContinuitySourcesRpc = Rpc.make(WS_METHODS.monarchContinuitySources, {
+  payload: MonarchContextProjectInput,
+  success: MonarchProjectSourcesResult,
+  error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+const WsMonarchContextGetRpc = Rpc.make(WS_METHODS.monarchContextGet, {
+  payload: MonarchContextProjectInput,
+  success: MonarchContextState,
+  error: Schema.Union([MonarchContextError, EnvironmentAuthorizationError]),
+});
+const WsMonarchContextSubscribeRpc = Rpc.make(WS_METHODS.monarchContextSubscribe, {
+  payload: MonarchContextProjectInput,
+  success: MonarchContextState,
+  error: Schema.Union([MonarchContextError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+const WsMonarchContextUpdateSettingsRpc = Rpc.make(WS_METHODS.monarchContextUpdateSettings, {
+  payload: MonarchContextUpdateSettingsInput,
+  success: MonarchContextState,
+  error: Schema.Union([MonarchContextError, EnvironmentAuthorizationError]),
+});
+const WsMonarchContextUpsertEntryRpc = Rpc.make(WS_METHODS.monarchContextUpsertEntry, {
+  payload: MonarchContextUpsertEntryInput,
+  success: MonarchContextEntry,
+  error: Schema.Union([MonarchContextError, EnvironmentAuthorizationError]),
+});
+const WsMonarchContextRemoveEntryRpc = Rpc.make(WS_METHODS.monarchContextRemoveEntry, {
+  payload: MonarchContextEntryInput,
+  success: MonarchContextEntry,
+  error: Schema.Union([MonarchContextError, EnvironmentAuthorizationError]),
+});
+const WsMonarchContextRestoreEntryRpc = Rpc.make(WS_METHODS.monarchContextRestoreEntry, {
+  payload: MonarchContextRestoreEntryInput,
+  success: MonarchContextEntry,
+  error: Schema.Union([MonarchContextError, EnvironmentAuthorizationError]),
+});
+const WsMonarchContextHistoryRpc = Rpc.make(WS_METHODS.monarchContextHistory, {
+  payload: MonarchContextHistoryInput,
+  success: MonarchContextHistory,
+  error: Schema.Union([MonarchContextError, EnvironmentAuthorizationError]),
+});
+const WsMonarchContextBriefRpc = Rpc.make(WS_METHODS.monarchContextBrief, {
+  payload: MonarchContextBriefInput,
+  success: MonarchContextBrief,
+  error: Schema.Union([MonarchContextError, EnvironmentAuthorizationError]),
 });
 
 const WsMonarchProjectStateRpc = Rpc.make(WS_METHODS.monarchProjectState, {
@@ -2164,6 +2257,18 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 ) {}
 
 export const WsRpcGroup = RpcGroup.make(
+  WsMonarchContinuityRefreshRpc,
+  WsMonarchContinuityActivityRpc,
+  WsMonarchContinuitySubscribeRpc,
+  WsMonarchContinuitySourcesRpc,
+  WsMonarchContextGetRpc,
+  WsMonarchContextSubscribeRpc,
+  WsMonarchContextUpdateSettingsRpc,
+  WsMonarchContextUpsertEntryRpc,
+  WsMonarchContextRemoveEntryRpc,
+  WsMonarchContextRestoreEntryRpc,
+  WsMonarchContextHistoryRpc,
+  WsMonarchContextBriefRpc,
   WsMonarchSchedulesListRpc,
   WsMonarchSchedulesSubscribeRpc,
   WsMonarchSchedulesUpsertRpc,

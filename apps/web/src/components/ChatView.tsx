@@ -1,4 +1,5 @@
 import { ChildThreadApprovals } from "./chat/ChildThreadApprovals";
+import { ProjectContextIncludedNotice } from "../monarch/ProjectContextIncludedNotice";
 import { workspaceAreaProps } from "../lib/workspaceFocus";
 import { sourceControlClients } from "@t3tools/client-runtime/source-control-clients";
 import { resolveNewThreadModelSelection } from "@t3tools/shared/usageLimits";
@@ -3815,6 +3816,15 @@ export default function ChatView(props: ChatViewProps) {
                             </div>
                           )}
                         </div>
+                        {activeProjectRef && !showProviderSubagentBar ? (
+                          <div className="flex justify-start px-2">
+                            <ProjectContextIncludedNotice
+                              key={`${activeProjectRef.environmentId}:${activeProjectRef.projectId}`}
+                              projectRef={activeProjectRef}
+                              branch={activeThreadBranch}
+                            />
+                          </div>
+                        ) : null}
                       </div>
                       {isDraftHeroState && composerBannerItems.length > 0 ? (
                         // Out of flow, like the headline, so a notice never moves the centered composer.

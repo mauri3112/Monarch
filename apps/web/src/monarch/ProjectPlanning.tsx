@@ -4,6 +4,7 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import type {
+  MonarchReviewSchedule,
   MonarchTarget,
   MonarchTargetStatus,
   NextThreadSuggestion,
@@ -15,6 +16,7 @@ import {
   PencilIcon,
   PlusIcon,
   RotateCcwIcon,
+  Settings2Icon,
   XIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
@@ -31,6 +33,7 @@ import { buildThreadRouteParams } from "../threadRoutes";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { usePrepareSuggestionDraft } from "./usePrepareSuggestionDraft";
 import { ProjectSchedules } from "./ProjectSchedules";
+import { SuggestionSettingsPanel } from "./SuggestionSettingsPanel";
 
 const STATUS_LABEL: Record<MonarchTargetStatus, string> = {
   draft: "Draft",
@@ -47,15 +50,23 @@ const splitNotes = (value: string) =>
 
 export function ProjectPlanning({
   projectRef,
+  projectTitle,
   archived,
   children,
 }: {
   projectRef: ScopedProjectRef;
+  projectTitle: string;
   archived: boolean;
   children?: ReactNode;
 }) {
   const query = useEnvironmentQuery(
     monarchEnvironment.projectState({
+      environmentId: projectRef.environmentId,
+      input: { projectId: projectRef.projectId },
+    }),
+  );
+  const contextQuery = useEnvironmentQuery(
+    monarchEnvironment.context.live({
       environmentId: projectRef.environmentId,
       input: { projectId: projectRef.projectId },
     }),
@@ -86,6 +97,8 @@ export function ProjectPlanning({
   const usedAcknowledgements = useRef(new Set<string>());
   const [editingTarget, setEditingTarget] = useState<MonarchTarget | "new" | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<NextThreadSuggestion | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [scheduleEditor, setScheduleEditor] = useState<MonarchReviewSchedule | "new" | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failedUsedAcknowledgement, setFailedUsedAcknowledgement] = useState<string | null>(null);
@@ -186,6 +199,7 @@ export function ProjectPlanning({
     title: string;
     prompt: string;
     targets?: NextThreadSuggestion["targets"];
+    contextRevision?: number;
   }) {
     if (!editingSuggestion) return;
     setBusyId(editingSuggestion.id);
@@ -381,13 +395,23 @@ export function ProjectPlanning({
         aria-labelledby="monarch-suggestions-heading"
         className="border-t border-border pt-7"
       >
-        <div>
-          <h2 id="monarch-suggestions-heading" className="text-base font-medium tracking-tight">
-            Suggested next threads
-          </h2>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Use opens a draft for you to edit and send.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 id="monarch-suggestions-heading" className="text-base font-medium tracking-tight">
+              Suggested next threads
+            </h2>
+            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+              Use opens a draft for you to edit and send.
+              {contextQuery.data?.settings.paused
+                ? " Project reviews are paused."
+                : contextQuery.data?.settings.enabled
+                  ? " Automatic updates are on."
+                  : " Automatic updates are off."}
+            </p>
+          </div>
+          <Button size="sm" variant="outline" onClick={() => setSettingsOpen(true)}>
+            <Settings2Icon /> Settings
+          </Button>
         </div>
         {query.data && suggestions.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5">
@@ -400,9 +424,17 @@ export function ProjectPlanning({
         {suggestions.length ? (
           <div className="mt-4 space-y-2.5">
             {suggestions.map((item) => {
-              const stale = item.targets.some(
+              const targetStale = item.targets.some(
                 (ref) => targetById.get(ref.targetId)?.revision !== ref.revision,
               );
+              const contextStale =
+                item.contextRevision !== undefined &&
+                contextQuery.data != null &&
+                item.contextRevision !== contextQuery.data.revision;
+              const hasExcludedSource = item.sourceThreadIds.some((id) =>
+                contextQuery.data?.settings.excludedThreadIds.includes(id),
+              );
+              const stale = targetStale || contextStale;
               return (
                 <article
                   key={item.id}
@@ -412,9 +444,14 @@ export function ProjectPlanning({
                     <span className="rounded-full bg-warning/12 px-2 py-0.5 text-3xs font-medium text-warning-foreground">
                       SUGGESTED
                     </span>
-                    {stale ? (
+                    {targetStale ? (
                       <span className="text-3xs text-warning-foreground">
                         Needs review after a Target changed
+                      </span>
+                    ) : null}
+                    {contextStale ? (
+                      <span className="text-3xs text-warning-foreground">
+                        Project context changed
                       </span>
                     ) : null}
                   </div>
@@ -445,11 +482,21 @@ export function ProjectPlanning({
                       </Link>
                     ))}
                   </div>
-                  {stale ? (
+                  {targetStale ? (
                     <p className="mt-2 text-xs text-warning-foreground">
                       A referenced Target changed. Review the prompt and update its Target
                       references before using this suggestion, or remove it and generate new
                       suggestions.
+                    </p>
+                  ) : null}
+                  {contextStale ? (
+                    <p className="mt-2 text-xs text-warning-foreground">
+                      Review this suggestion against the current project context before using it.
+                    </p>
+                  ) : null}
+                  {hasExcludedSource ? (
+                    <p className="mt-2 text-xs text-warning-foreground">
+                      Includes an excluded source. Review the prompt before using it.
                     </p>
                   ) : null}
                   {item.draftThreadId ? (
@@ -462,7 +509,9 @@ export function ProjectPlanning({
                     <SuggestionEditor
                       suggestion={item}
                       currentTargets={targetById}
-                      stale={stale}
+                      targetStale={targetStale}
+                      contextStale={contextStale}
+                      currentContextRevision={contextQuery.data?.revision}
                       busy={busyId === item.id}
                       onSave={(input) => void saveSuggestion(input)}
                       onCancel={() => setEditingSuggestion(null)}
@@ -471,7 +520,12 @@ export function ProjectPlanning({
                   <div className="mt-4 flex flex-wrap gap-2 border-t border-warning/20 pt-3">
                     <Button
                       size="xs"
-                      disabled={stale || !canEdit || draft.preparingId === item.id}
+                      disabled={
+                        stale ||
+                        (item.contextRevision !== undefined && !contextQuery.data) ||
+                        !canEdit ||
+                        draft.preparingId === item.id
+                      }
                       onClick={() => void draft.prepare(item)}
                     >
                       <CheckIcon />{" "}
@@ -562,7 +616,32 @@ export function ProjectPlanning({
           </p>
         ) : null}
       </section>
-      <ProjectSchedules projectRef={projectRef} archived={archived} />
+      <ProjectSchedules
+        projectRef={projectRef}
+        archived={archived}
+        suggestionEditor={scheduleEditor}
+        onSuggestionEditorChange={setScheduleEditor}
+      />
+      {settingsOpen ? (
+        <SuggestionSettingsPanel
+          key={`${projectRef.environmentId}:${projectRef.projectId}`}
+          projectRef={projectRef}
+          projectTitle={projectTitle}
+          open
+          onClose={() => setSettingsOpen(false)}
+          onManageSchedule={(schedule) => {
+            setScheduleEditor(schedule);
+            setSettingsOpen(false);
+            requestAnimationFrame(() =>
+              document.getElementById("monarch-schedules-heading")?.scrollIntoView({
+                behavior: "smooth",
+                block: "start",
+              }),
+            );
+          }}
+          archived={archived}
+        />
+      ) : null}
     </div>
   );
 }
@@ -672,25 +751,31 @@ function TargetEditor({
 function SuggestionEditor({
   suggestion,
   currentTargets,
-  stale,
+  targetStale,
+  contextStale,
+  currentContextRevision,
   busy,
   onSave,
   onCancel,
 }: {
   suggestion: NextThreadSuggestion;
   currentTargets: ReadonlyMap<string, MonarchTarget>;
-  stale: boolean;
+  targetStale: boolean;
+  contextStale: boolean;
+  currentContextRevision: number | undefined;
   busy: boolean;
   onSave: (value: {
     title: string;
     prompt: string;
     targets?: NextThreadSuggestion["targets"];
+    contextRevision?: number;
   }) => void;
   onCancel: () => void;
 }) {
   const [title, setTitle] = useState(suggestion.title);
   const [prompt, setPrompt] = useState(suggestion.prompt);
   const [useCurrentTargets, setUseCurrentTargets] = useState(false);
+  const [useCurrentContext, setUseCurrentContext] = useState(false);
   const canRebase = suggestion.targets.every(
     (reference) => currentTargets.get(reference.targetId)?.status === "active",
   );
@@ -707,6 +792,9 @@ function SuggestionEditor({
                 revision: currentTargets.get(reference.targetId)!.revision,
               })),
             }
+          : {}),
+        ...(useCurrentContext && currentContextRevision !== undefined
+          ? { contextRevision: currentContextRevision }
           : {}),
       });
   };
@@ -733,7 +821,7 @@ function SuggestionEditor({
           required
         />
       </label>
-      {stale && canRebase ? (
+      {targetStale && canRebase ? (
         <label className="flex items-start gap-2 text-xs">
           <input
             type="checkbox"
@@ -746,11 +834,24 @@ function SuggestionEditor({
           </span>
         </label>
       ) : null}
-      {stale && !canRebase ? (
+      {targetStale && !canRebase ? (
         <p className="text-xs text-warning-foreground">
           A referenced Target is no longer active. Reactivate it, or remove this suggestion and run
           a new project review.
         </p>
+      ) : null}
+      {contextStale && currentContextRevision !== undefined ? (
+        <label className="flex items-start gap-2 text-xs">
+          <input
+            type="checkbox"
+            checked={useCurrentContext}
+            onChange={(event) => setUseCurrentContext(event.target.checked)}
+          />
+          <span>
+            I reviewed this prompt against the current project context. Update its context reference
+            so it can be used.
+          </span>
+        </label>
       ) : null}
       <div className="flex gap-2">
         <Button size="xs" type="submit" disabled={busy || !title.trim() || !prompt.trim()}>

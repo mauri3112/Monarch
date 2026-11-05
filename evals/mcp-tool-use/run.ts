@@ -58,6 +58,7 @@ import { PreviewToolkit } from "../../apps/server/src/mcp/toolkits/preview/tools
 import { PreviewControlsToolkit } from "../../apps/server/src/mcp/toolkits/previewControls/tools.ts";
 import { ProjectToolkit } from "../../apps/server/src/mcp/toolkits/project/tools.ts";
 import { MonarchToolkit } from "../../apps/server/src/mcp/toolkits/monarch/tools.ts";
+import { MonarchContextToolkit } from "../../apps/server/src/mcp/toolkits/monarch/contextTools.ts";
 import {
   CHILD_PULL_REQUEST_REPORT_NEXT,
   PullRequestsToolkit,
@@ -417,6 +418,7 @@ const t3SourceTools: ReadonlyArray<Tool.Any> = [
   AttachmentToolkit,
   ProjectToolkit,
   MonarchToolkit,
+  MonarchContextToolkit,
   EnvironmentToolkit,
   PreviewControlsToolkit,
   WorktreeToolkit,

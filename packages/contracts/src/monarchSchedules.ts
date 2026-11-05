@@ -1,6 +1,6 @@
 import * as Schema from "effect/Schema";
 
-import { IsoDateTime, ProjectId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, ProjectId, RunId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { ModelSelection } from "./modelSelection.ts";
 
 export const MONARCH_REVIEW_DRIVER_KINDS = ["codex", "claude", "claudeAgent"] as const;
@@ -67,14 +67,30 @@ export const MonarchScheduleRun = Schema.Struct({
   id: Schema.String,
   scheduleId: MonarchScheduleId,
   projectId: ProjectId,
-  trigger: Schema.Literals(["scheduled", "manual"]),
+  trigger: Schema.Literals([
+    "scheduled",
+    "manual",
+    "work-completed",
+    "targets-changed",
+    "project-changed",
+    "build-context",
+    "refresh",
+    "retry",
+  ]),
   scheduledFor: Schema.NullOr(IsoDateTime),
   startedAt: IsoDateTime,
   completedAt: Schema.NullOr(IsoDateTime),
   status: MonarchScheduleRunStatus,
   error: Schema.NullOr(Schema.String),
+  summary: Schema.optionalKey(Schema.String),
   modelSelection: ModelSelection,
   suggestionIds: Schema.Array(Schema.String),
+  contextRevision: Schema.optionalKey(Schema.Int),
+  contextEntryIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  sourceRunIds: Schema.optionalKey(Schema.Array(RunId)),
+  requestVersion: Schema.optionalKey(Schema.Int),
+  updateContext: Schema.optionalKey(Schema.Boolean),
+  updateSuggestions: Schema.optionalKey(Schema.Boolean),
 });
 export type MonarchScheduleRun = typeof MonarchScheduleRun.Type;
 export const MonarchSchedulesListInput = Schema.Struct({ projectId: ProjectId });
@@ -112,6 +128,8 @@ export class MonarchScheduleError extends Schema.TaggedError<MonarchScheduleErro
       "provider_unavailable",
       "generation_failed",
       "persistence",
+      "paused",
+      "daily_limit",
     ]),
     cause: Schema.optional(Schema.Defect()),
   },
@@ -132,6 +150,10 @@ export class MonarchScheduleError extends Schema.TaggedError<MonarchScheduleErro
         return "The project review failed to produce valid suggestions.";
       case "persistence":
         return "The project review could not be saved or loaded.";
+      case "paused":
+        return "Project updates are paused. Resume them in suggestion settings.";
+      case "daily_limit":
+        return "This project's daily review limit has been reached.";
     }
   }
 }
@@ -139,3 +161,35 @@ export const MonarchSchedulesRunNowResult = Schema.Struct({ runId: Schema.String
 export const MonarchSchedulesHistoryResult = Schema.Struct({
   runs: Schema.Array(MonarchScheduleRun),
 });
+export const MonarchProjectRefreshInput = Schema.Struct({
+  projectId: ProjectId,
+  mode: Schema.Literals(["build-context", "refresh", "retry"]),
+  threadIds: Schema.optionalKey(
+    Schema.Array(ThreadId).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
+  ),
+});
+export type MonarchProjectRefreshInput = typeof MonarchProjectRefreshInput.Type;
+export const MonarchProjectRefreshResult = Schema.Struct({
+  jobId: Schema.String,
+  status: Schema.Literal("queued"),
+});
+export const MonarchProjectActivityResult = Schema.Struct({
+  pending: Schema.Boolean,
+  blockedReason: Schema.NullOr(Schema.Literals(["paused", "active-work", "daily-limit", "failed"])),
+  updatesToday: Schema.Int,
+  maxUpdatesPerDay: Schema.Int,
+  runs: Schema.Array(MonarchScheduleRun),
+});
+export type MonarchProjectActivityResult = typeof MonarchProjectActivityResult.Type;
+export const MonarchProjectSourcesResult = Schema.Struct({
+  sources: Schema.Array(
+    Schema.Struct({
+      threadId: ThreadId,
+      title: Schema.String,
+      runId: RunId,
+      completedAt: IsoDateTime,
+      excluded: Schema.Boolean,
+    }),
+  ),
+});
+export type MonarchProjectSourcesResult = typeof MonarchProjectSourcesResult.Type;

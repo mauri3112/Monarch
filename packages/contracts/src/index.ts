@@ -74,5 +74,6 @@ export * from "./secretReference.ts";
 export * from "./settingsSecretValue.ts";
 export * from "./clientRpcPermissions.ts";
 export * from "./monarch.ts";
+export * from "./monarchContext.ts";
 
 export * from "./monarchSchedules.ts";

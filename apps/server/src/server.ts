@@ -1,4 +1,5 @@
 import * as Monarch from "./monarch/MonarchService.ts";
+import * as MonarchContext from "./monarch/MonarchContextService.ts";
 import * as MonarchSchedules from "./monarch/MonarchScheduler.ts";
 import * as Scheduler from "./scheduling/Scheduler.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
@@ -626,7 +627,7 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
 );
 
 const layerRuntimeCoreDependenciesBase = Layer.mergeAll(
-  MonarchSchedules.layer.pipe(Layer.provideMerge(Monarch.layer)),
+  MonarchSchedules.layer.pipe(Layer.provideMerge(Layer.merge(Monarch.layer, MonarchContext.layer))),
   AgentAwarenessRelay.layer,
   HeldHooksWaker.layer,
   layerThreadSettlementWorker,

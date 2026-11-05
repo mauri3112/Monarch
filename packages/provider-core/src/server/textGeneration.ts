@@ -98,6 +98,29 @@ export type ReviewGuideGenerationResult = Omit<
 >;
 
 export interface ProviderTextGeneration {
+  /** Extract reported project facts from bounded completed-run evidence. Empty is valid. */
+  readonly generateProjectContext?: (input: {
+    readonly cwd: string;
+    readonly context: string;
+    readonly modelSelection: ModelSelection;
+  }) => Effect.Effect<
+    {
+      readonly entries: ReadonlyArray<{
+        readonly kind: "overview" | "architecture" | "decision" | "question" | "outcome";
+        readonly title: string;
+        readonly body: string;
+        readonly scope: "project" | "branch";
+        readonly branch: string | null;
+        readonly sourceRefs: ReadonlyArray<{
+          readonly threadId: string;
+          readonly runId: string;
+        }>;
+        readonly contradictsEntryIds: ReadonlyArray<string>;
+      }>;
+    },
+    TextGenerationError
+  >;
+
   /** Text-only planning. Missing on custom providers that do not implement this capability. */
   readonly generateProjectSuggestions?: (input: {
     readonly cwd: string;

@@ -1,12 +1,16 @@
-import { scopedThreadKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
+import {
+  scopedProjectKey,
+  scopedThreadKey,
+  scopeThreadRef,
+} from "@t3tools/client-runtime/environment";
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/models";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRightIcon, GitBranchIcon, PlusIcon } from "lucide-react";
-import { useState, type ReactNode } from "react";
+import { ArrowUpRightIcon, BookOpenIcon, GitBranchIcon, PlusIcon } from "lucide-react";
+import { lazy, Suspense, useState, type ReactNode } from "react";
 
 import { resolveSidebarThreadStatus } from "../components/Sidebar.logic";
 import { Button } from "../components/ui/button";
@@ -45,6 +49,10 @@ const STATUS_LABELS = {
   ready: "Ready",
 } as const;
 
+const ProjectContextPanel = lazy(() =>
+  import("./ProjectContextPanel").then((module) => ({ default: module.ProjectContextPanel })),
+);
+
 export function ProjectBoard({
   project,
   projectRef,
@@ -66,6 +74,7 @@ export function ProjectBoard({
   const [visibleCount, setVisibleCount] = useState(24);
   const [starting, setStarting] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
+  const [contextOpen, setContextOpen] = useState(false);
   const projectThreads = selectProjectThreads(
     threads,
     projectRef,
@@ -127,6 +136,9 @@ export function ProjectBoard({
             <PlusIcon />
             {starting ? "Opening…" : "New thread"}
           </Button>
+          <Button variant="outline" onClick={() => setContextOpen(true)}>
+            <BookOpenIcon /> Project context
+          </Button>
           {actions}
         </div>
         {startError ? (
@@ -135,7 +147,24 @@ export function ProjectBoard({
           </p>
         ) : null}
       </header>
-      <ProjectPlanning projectRef={projectRef} archived={project.archivedAt != null}>
+      {contextOpen ? (
+        <Suspense fallback={null}>
+          <ProjectContextPanel
+            key={scopedProjectKey(projectRef)}
+            projectRef={projectRef}
+            projectTitle={project.title}
+            open
+            onClose={() => setContextOpen(false)}
+            archived={project.archivedAt != null}
+          />
+        </Suspense>
+      ) : null}
+      <ProjectPlanning
+        key={scopedProjectKey(projectRef)}
+        projectRef={projectRef}
+        projectTitle={project.title}
+        archived={project.archivedAt != null}
+      >
         <section aria-labelledby="monarch-threads-heading" className="border-t border-border pt-7">
           <div className="flex items-center gap-2.5">
             <h2 id="monarch-threads-heading" className="text-base font-medium tracking-tight">

@@ -38,6 +38,13 @@ import type * as RpcGroup from "effect/rpc/RpcGroup";
 type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 
 export const RPC_REQUIRED_SCOPES = {
+  [WS_METHODS.monarchContinuityActivity]: AuthOrchestrationReadScope,
+  [WS_METHODS.monarchContinuitySubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.monarchContinuitySources]: AuthOrchestrationReadScope,
+  [WS_METHODS.monarchContextGet]: AuthOrchestrationReadScope,
+  [WS_METHODS.monarchContextSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.monarchContextHistory]: AuthOrchestrationReadScope,
+  [WS_METHODS.monarchContextBrief]: AuthOrchestrationReadScope,
   [WS_METHODS.monarchProjectState]: AuthOrchestrationReadScope,
   [WS_METHODS.monarchSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.monarchSchedulesList]: AuthOrchestrationReadScope,

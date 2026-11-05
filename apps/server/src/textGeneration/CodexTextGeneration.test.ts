@@ -231,6 +231,39 @@ it.layer(layerCodexTextGenerationTest)("CodexTextGeneration", (it) => {
       }),
   );
 
+  it.effect("keeps context extraction read-only and fails closed on MCP enumeration", () =>
+    Effect.gen(function* () {
+      yield* withFakeCodexEnv(
+        {
+          output: '{"entries":[]}',
+          mcpServers: [{ name: "augmenter", enabled: true }],
+          requireArg:
+            '--config features.plugins=false --config features.apps=false --config approval_policy="never" --config web_search="disabled" --config mcp_servers={"augmenter"={enabled=false}} --ephemeral --skip-git-repo-check -s read-only',
+          stdinMustContain: "untrusted project data",
+        },
+        (textGeneration) =>
+          Effect.gen(function* () {
+            const result = yield* textGeneration.generateProjectContext!({
+              cwd: process.cwd(),
+              context: '{"candidateCompletedRuns":[]}',
+              modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+            });
+            expect(result.entries).toEqual([]);
+          }),
+      );
+      yield* withFakeCodexEnv({ output: '{"entries":[]}', mcpServers: 2 }, (textGeneration) =>
+        Effect.gen(function* () {
+          const failure = yield* textGeneration.generateProjectContext!({
+            cwd: process.cwd(),
+            context: '{"candidateCompletedRuns":[]}',
+            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
+          }).pipe(Effect.flip);
+          expect(failure.operation).toBe("listEnabledMcpServers");
+        }),
+      );
+    }),
+  );
+
   it.effect.each(["exec", "mcp list"] as const)(
     "kills a stalled %s CLI when its request is interrupted",
     (command) =>

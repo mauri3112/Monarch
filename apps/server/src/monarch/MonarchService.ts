@@ -158,8 +158,20 @@ const make = Effect.gen(function* () {
     return yield* decodeSuggestion(rows[0].payload).pipe(storage);
   });
   const validateReferences = Effect.fn("MonarchService.validateReferences")(function* (
-    input: Pick<NextThreadSuggestion, "projectId" | "targets" | "sourceThreadIds">,
+    input: Pick<
+      NextThreadSuggestion,
+      "projectId" | "targets" | "sourceThreadIds" | "contextRevision"
+    >,
   ) {
+    if (input.contextRevision !== undefined) {
+      const [context] = yield* sql<{
+        revision: number;
+      }>`SELECT revision FROM monarch_project_context WHERE project_id = ${input.projectId}`.pipe(
+        storage,
+      );
+      if ((context?.revision ?? 0) !== input.contextRevision)
+        return yield* new MonarchError({ reason: "conflict" });
+    }
     for (const reference of input.targets) {
       const target = yield* readTarget(input.projectId, reference.targetId).pipe(
         Effect.catchTags({
@@ -343,11 +355,18 @@ const make = Effect.gen(function* () {
       const input = yield* decodeInput(MonarchUpdateSuggestionInput, raw);
       const previous = yield* requireSuggestion(input);
       const targets = input.targets ?? previous.targets;
-      if (input.targets !== undefined) yield* validateReferences({ ...previous, targets });
+      const contextRevision = input.contextRevision ?? previous.contextRevision;
+      if (input.targets !== undefined || input.contextRevision !== undefined)
+        yield* validateReferences({
+          ...previous,
+          targets,
+          ...(contextRevision === undefined ? {} : { contextRevision }),
+        });
       return yield* saveSuggestion(
         {
           ...previous,
           targets,
+          ...(contextRevision === undefined ? {} : { contextRevision }),
           title: input.title,
           prompt: input.prompt,
           revision: previous.revision + 1,
