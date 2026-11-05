@@ -135,85 +135,80 @@ export function ProjectBoard({
           </p>
         ) : null}
       </header>
-      <ProjectPlanning projectRef={projectRef} archived={project.archivedAt != null} />
-      <section
-        aria-labelledby="monarch-threads-heading"
-        className="mt-8 border-t border-border pt-7"
-      >
-        <p className="text-3xs font-medium uppercase tracking-widest text-muted-foreground">
-          04 / History
-        </p>
-        <div className="mt-1 flex items-center gap-2.5">
-          <h2 id="monarch-threads-heading" className="text-sm font-medium">
-            Threads
-          </h2>
-          <span className="text-2xs text-muted-foreground">{shownThreads.length} shown</span>
-        </div>
-        <div
-          className="mt-3 mb-4 flex flex-wrap gap-1"
-          role="group"
-          aria-label="Filter project threads"
-        >
-          {FILTERS.map(([value, label]) => (
-            <Button
-              key={value}
-              size="sm"
-              variant={filter === value ? "secondary" : "ghost-muted"}
-              aria-pressed={filter === value}
-              onClick={() => setFilter(value)}
-            >
-              {label}
-            </Button>
-          ))}
-        </div>
-        {shellStatus !== "live" ? (
-          <p className="py-3 text-xs text-muted-foreground" role="status">
-            Showing saved threads. Waiting for this environment to reconnect.
-          </p>
-        ) : null}
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(min(260px,100%),1fr))] gap-3">
-          {shownThreads.map((thread) => (
-            <ProjectThreadCard
-              key={scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))}
-              thread={thread}
-              selected={
-                selectedThreadRef?.environmentId === thread.environmentId &&
-                selectedThreadRef.threadId === thread.id
-              }
-            />
-          ))}
-        </div>
-        {shownThreads.length === 0 && !shelf.loading ? (
-          <p className="py-3 text-xs text-muted-foreground">
-            {filter === "all"
-              ? "No threads to show yet. Start one when you’re ready."
-              : "No matching threads in the loaded history."}
-          </p>
-        ) : null}
-        {showSettled && (moreSettled || shelf.loading || shelf.failed) ? (
-          <div className="mt-6 space-y-2">
-            {shelf.failed ? (
-              <p className="mt-3 text-xs text-destructive" role="alert">
-                Could not load older threads.
-              </p>
-            ) : null}
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={shelf.loading}
-              onClick={() =>
-                shelf.failed ? shelf.retry() : setVisibleCount((count) => count + 24)
-              }
-            >
-              {shelf.loading
-                ? "Loading older threads…"
-                : shelf.failed
-                  ? "Retry older threads"
-                  : "Load older threads"}
-            </Button>
+      <ProjectPlanning projectRef={projectRef} archived={project.archivedAt != null}>
+        <section aria-labelledby="monarch-threads-heading" className="border-t border-border pt-7">
+          <div className="flex items-center gap-2.5">
+            <h2 id="monarch-threads-heading" className="text-base font-medium tracking-tight">
+              Threads
+            </h2>
+            <span className="text-2xs text-muted-foreground">{shownThreads.length} shown</span>
           </div>
-        ) : null}
-      </section>
+          <div
+            className="mt-3 mb-4 flex flex-wrap gap-1"
+            role="group"
+            aria-label="Filter project threads"
+          >
+            {FILTERS.map(([value, label]) => (
+              <Button
+                key={value}
+                size="sm"
+                variant={filter === value ? "secondary" : "ghost-muted"}
+                aria-pressed={filter === value}
+                onClick={() => setFilter(value)}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+          {shellStatus !== "live" ? (
+            <p className="py-3 text-xs text-muted-foreground" role="status">
+              Showing saved threads. Waiting for this environment to reconnect.
+            </p>
+          ) : null}
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(260px,100%),1fr))] gap-3">
+            {shownThreads.map((thread) => (
+              <ProjectThreadCard
+                key={scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))}
+                thread={thread}
+                selected={
+                  selectedThreadRef?.environmentId === thread.environmentId &&
+                  selectedThreadRef.threadId === thread.id
+                }
+              />
+            ))}
+          </div>
+          {shownThreads.length === 0 && !shelf.loading ? (
+            <p className="py-3 text-xs text-muted-foreground">
+              {filter === "all"
+                ? "No threads to show yet. Start one when you’re ready."
+                : "No matching threads in the loaded history."}
+            </p>
+          ) : null}
+          {showSettled && (moreSettled || shelf.loading || shelf.failed) ? (
+            <div className="mt-6 space-y-2">
+              {shelf.failed ? (
+                <p className="mt-3 text-xs text-destructive" role="alert">
+                  Could not load older threads.
+                </p>
+              ) : null}
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={shelf.loading}
+                onClick={() =>
+                  shelf.failed ? shelf.retry() : setVisibleCount((count) => count + 24)
+                }
+              >
+                {shelf.loading
+                  ? "Loading older threads…"
+                  : shelf.failed
+                    ? "Retry older threads"
+                    : "Load older threads"}
+              </Button>
+            </div>
+          ) : null}
+        </section>
+      </ProjectPlanning>
     </div>
   );
 }

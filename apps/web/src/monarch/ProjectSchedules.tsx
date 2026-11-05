@@ -3,18 +3,20 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { ScheduledTask, ScopedProjectRef } from "@t3tools/contracts";
+import type { MonarchReviewSchedule, ScheduledTask, ScopedProjectRef } from "@t3tools/contracts";
 import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { CalendarClockIcon, PauseIcon, PencilIcon, PlayIcon, PlusIcon } from "lucide-react";
+import { PauseIcon, PencilIcon, PlayIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
 
 import { scheduleLabel } from "../components/settings/scheduledTaskLabels";
 import { Button } from "../components/ui/button";
+import { Menu, MenuTrigger, MenuPopup, MenuItem } from "../components/ui/menu";
 import { readEnvironmentScope } from "../state/session";
 import { useEnvironmentQuery } from "../state/query";
 import { serverEnvironment } from "../state/server";
 import { useAtomCommand } from "../state/use-atom-command";
+import { ProjectReviewSchedules } from "./ProjectReviewSchedules";
 
 export function ProjectSchedules({
   projectRef,
@@ -41,6 +43,9 @@ export function ProjectSchedules({
   });
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [suggestionEditor, setSuggestionEditor] = useState<MonarchReviewSchedule | "new" | null>(
+    null,
+  );
   const tasks = (query.data?.tasks ?? []).filter((task) => task.projectId === projectRef.projectId);
 
   const edit = (task?: ScheduledTask) =>
@@ -73,28 +78,20 @@ export function ProjectSchedules({
   return (
     <section aria-labelledby="monarch-schedules-heading" className="border-t border-border pt-7">
       <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-3xs font-medium uppercase tracking-widest text-muted-foreground">
-            Runs prompts
-          </p>
-          <h2
-            id="monarch-schedules-heading"
-            className="mt-1 flex items-center gap-2 text-sm font-medium tracking-tight"
+        <h2 id="monarch-schedules-heading" className="text-base font-medium tracking-tight">
+          Scheduled tasks
+        </h2>
+        <Menu>
+          <MenuTrigger
+            render={<Button size="sm" variant="outline" disabled={archived || !canOperate} />}
           >
-            <CalendarClockIcon size={17} aria-hidden="true" /> Scheduled work
-          </h2>
-          <p className="mt-1 text-xs text-muted-foreground">
-            Saved prompts that run on a schedule you choose.
-          </p>
-        </div>
-        <Button
-          size="sm"
-          variant="outline"
-          disabled={archived || !canOperate}
-          onClick={() => edit()}
-        >
-          <PlusIcon /> Add task
-        </Button>
+            <PlusIcon /> Add task
+          </MenuTrigger>
+          <MenuPopup align="end">
+            <MenuItem onClick={() => edit()}>Run a prompt</MenuItem>
+            <MenuItem onClick={() => setSuggestionEditor("new")}>Suggest next threads</MenuItem>
+          </MenuPopup>
+        </Menu>
       </div>
       {query.error ? (
         <p role="alert" className="mt-4 text-xs text-destructive">
@@ -114,15 +111,13 @@ export function ProjectSchedules({
           Loading scheduled tasks…
         </p>
       ) : null}
-      {query.data && tasks.length === 0 ? (
-        <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5">
-          <p className="text-sm font-medium">No scheduled tasks yet</p>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Add a prompt for recurring or one-time work. Targets and suggested threads never run on
-            their own.
-          </p>
-        </div>
-      ) : null}
+      <ProjectReviewSchedules
+        projectRef={projectRef}
+        archived={archived}
+        editor={suggestionEditor}
+        onEditorChange={setSuggestionEditor}
+        showEmpty={query.data !== undefined && tasks.length === 0}
+      />
       {tasks.length > 0 ? (
         <div className="mt-4 space-y-2">
           {tasks.map((task) => (
@@ -149,6 +144,7 @@ export function ProjectSchedules({
                 </Button>
               </div>
               <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/70 pt-3 text-2xs text-muted-foreground">
+                <span>Runs a prompt</span>
                 <span>{scheduleLabel(task.schedule)}</span>
                 <span>
                   {task.blockedByPolicy ??

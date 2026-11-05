@@ -12,14 +12,12 @@ import type {
 import {
   ArrowUpRightIcon,
   CheckIcon,
-  CompassIcon,
-  LightbulbIcon,
   PencilIcon,
   PlusIcon,
   RotateCcwIcon,
   XIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent } from "react";
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 
 import { Button } from "../components/ui/button";
@@ -32,7 +30,6 @@ import { useQuietThreadShells } from "../state/entities";
 import { buildThreadRouteParams } from "../threadRoutes";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { usePrepareSuggestionDraft } from "./usePrepareSuggestionDraft";
-import { ProjectReviewSchedules } from "./ProjectReviewSchedules";
 import { ProjectSchedules } from "./ProjectSchedules";
 
 const STATUS_LABEL: Record<MonarchTargetStatus, string> = {
@@ -51,9 +48,11 @@ const splitNotes = (value: string) =>
 export function ProjectPlanning({
   projectRef,
   archived,
+  children,
 }: {
   projectRef: ScopedProjectRef;
   archived: boolean;
+  children?: ReactNode;
 }) {
   const query = useEnvironmentQuery(
     monarchEnvironment.projectState({
@@ -283,18 +282,9 @@ export function ProjectPlanning({
       <section aria-labelledby="monarch-targets-heading">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <p className="text-3xs font-medium uppercase tracking-widest text-muted-foreground">
-              01 / Direction
-            </p>
-            <h2
-              id="monarch-targets-heading"
-              className="mt-1 flex items-center gap-2 text-base font-medium tracking-tight"
-            >
-              <CompassIcon size={17} aria-hidden="true" /> Targets
+            <h2 id="monarch-targets-heading" className="text-base font-medium tracking-tight">
+              Targets
             </h2>
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              Long term directions for this project.
-            </p>
           </div>
           <Button
             size="sm"
@@ -318,8 +308,7 @@ export function ProjectPlanning({
           <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5">
             <p className="text-sm font-medium">Set a direction</p>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              A Target gives project reviews context across threads. It does not start work by
-              itself.
+              Describe what you want this project to achieve.
             </p>
           </div>
         ) : null}
@@ -387,32 +376,24 @@ export function ProjectPlanning({
           </details>
         ) : null}
       </section>
-      <ProjectReviewSchedules projectRef={projectRef} archived={archived} />
-      <ProjectSchedules projectRef={projectRef} archived={archived} />
+      {children}
       <section
         aria-labelledby="monarch-suggestions-heading"
         className="border-t border-border pt-7"
       >
         <div>
-          <p className="text-3xs font-medium uppercase tracking-widest text-muted-foreground">
-            03 / Consider
-          </p>
-          <h2
-            id="monarch-suggestions-heading"
-            className="mt-1 flex items-center gap-2 text-base font-medium tracking-tight"
-          >
-            <LightbulbIcon size={17} aria-hidden="true" /> Suggested next threads
+          <h2 id="monarch-suggestions-heading" className="text-base font-medium tracking-tight">
+            Suggested next threads
           </h2>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Ideas from project reviews. Use opens an editable draft; nothing is sent.
+            Use opens a draft for you to edit and send.
           </p>
         </div>
         {query.data && suggestions.length === 0 ? (
           <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5">
             <p className="text-sm font-medium">No suggestions to review</p>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              A project review can propose a next thread with the reasoning and source threads
-              attached.
+              Schedule suggestions to find next steps from your Targets and recent threads.
             </p>
           </div>
         ) : null}
@@ -467,8 +448,8 @@ export function ProjectPlanning({
                   {stale ? (
                     <p className="mt-2 text-xs text-warning-foreground">
                       A referenced Target changed. Review the prompt and update its Target
-                      references before using this suggestion, or remove it and generate a new
-                      review.
+                      references before using this suggestion, or remove it and generate new
+                      suggestions.
                     </p>
                   ) : null}
                   {item.draftThreadId ? (
@@ -581,6 +562,7 @@ export function ProjectPlanning({
           </p>
         ) : null}
       </section>
+      <ProjectSchedules projectRef={projectRef} archived={archived} />
     </div>
   );
 }

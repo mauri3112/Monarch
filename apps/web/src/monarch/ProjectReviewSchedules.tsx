@@ -10,15 +10,7 @@ import type {
   ScopedProjectRef,
 } from "@t3tools/contracts";
 import { MONARCH_REVIEW_DRIVER_KINDS } from "@t3tools/contracts";
-import {
-  CalendarClockIcon,
-  HistoryIcon,
-  PauseIcon,
-  PencilIcon,
-  PlayIcon,
-  PlusIcon,
-  Trash2Icon,
-} from "lucide-react";
+import { HistoryIcon, PauseIcon, PencilIcon, PlayIcon, Trash2Icon } from "lucide-react";
 import { useState, type FormEvent } from "react";
 
 import { ProviderModelPicker } from "../components/chat/ProviderModelPicker";
@@ -48,9 +40,15 @@ function recurrenceLabel(recurrence: MonarchScheduleRecurrence, timezone: string
 export function ProjectReviewSchedules({
   projectRef,
   archived,
+  editor,
+  onEditorChange,
+  showEmpty,
 }: {
   projectRef: ScopedProjectRef;
   archived: boolean;
+  editor: MonarchReviewSchedule | "new" | null;
+  onEditorChange: (editor: MonarchReviewSchedule | "new" | null) => void;
+  showEmpty: boolean;
 }) {
   const query = useEnvironmentQuery(
     monarchEnvironment.schedules.live({
@@ -73,7 +71,6 @@ export function ProjectReviewSchedules({
   const runNow = useAtomCommand(monarchEnvironment.schedules.runNow, {
     label: "run project review",
   });
-  const [editor, setEditor] = useState<MonarchReviewSchedule | "new" | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const schedules = query.data?.schedules ?? [];
@@ -103,13 +100,13 @@ export function ProjectReviewSchedules({
       if (!isAtomCommandInterrupted(result)) setError(String(squashAtomCommandFailure(result)));
       return;
     }
-    setEditor(null);
+    onEditorChange(null);
     query.refresh();
   }
 
   async function act(item: MonarchReviewSchedule, action: "toggle" | "run" | "remove") {
     if (action === "remove") {
-      const confirmed = await requestConfirmDialog(`Delete the review schedule “${item.title}”?`, {
+      const confirmed = await requestConfirmDialog(`Delete the scheduled task “${item.title}”?`, {
         variant: "destructive",
       });
       if (!confirmed) return;
@@ -138,38 +135,10 @@ export function ProjectReviewSchedules({
   }
 
   return (
-    <section
-      aria-labelledby="monarch-scheduled-tasks-heading"
-      className="border-t border-border pt-7"
-    >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <p className="text-3xs font-medium uppercase tracking-widest text-muted-foreground">
-            02 / Rhythm
-          </p>
-          <h2
-            id="monarch-scheduled-tasks-heading"
-            className="mt-1 flex items-center gap-2 text-base font-medium tracking-tight"
-          >
-            <CalendarClockIcon size={17} aria-hidden="true" /> Scheduled tasks
-          </h2>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Review the project on a cadence or schedule a prompt to run.
-          </p>
-        </div>
-        <Button size="sm" variant="outline" disabled={!canEdit} onClick={() => setEditor("new")}>
-          <PlusIcon /> Add review
-        </Button>
-      </div>
-      <div className="mt-5">
-        <h3 className="text-sm font-medium">Project reviews</h3>
-        <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-          A review looks across threads and may add suggested next threads. It does not start them.
-        </p>
-      </div>
+    <>
       {query.error ? (
         <p role="alert" className="mt-3 text-xs text-destructive">
-          Could not load reviews: {query.error}{" "}
+          Could not load suggestion schedules: {query.error}{" "}
           <Button size="xs" variant="ghost" onClick={query.refresh}>
             Retry
           </Button>
@@ -182,7 +151,7 @@ export function ProjectReviewSchedules({
       ) : null}
       {query.isPending && !query.data ? (
         <p role="status" className="mt-3 text-xs text-muted-foreground">
-          Loading project reviews…
+          Loading suggestion schedules…
         </p>
       ) : null}
       {editor ? (
@@ -192,14 +161,14 @@ export function ProjectReviewSchedules({
           schedule={editor === "new" ? null : editor}
           busy={busyId === "editor"}
           onSave={(value) => void save(value)}
-          onCancel={() => setEditor(null)}
+          onCancel={() => onEditorChange(null)}
         />
       ) : null}
-      {query.data && schedules.length === 0 && !editor ? (
+      {showEmpty && query.data && schedules.length === 0 && !editor ? (
         <div className="mt-4 rounded-xl border border-dashed border-border p-4">
-          <p className="text-sm font-medium">No project reviews scheduled</p>
+          <p className="text-sm font-medium">No scheduled tasks yet</p>
           <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-            Set a cadence to surface grounded ideas as the project changes.
+            Run a prompt or suggest next threads on a schedule.
           </p>
         </div>
       ) : null}
@@ -212,13 +181,13 @@ export function ProjectReviewSchedules({
               schedule={schedule}
               canEdit={canEdit}
               busy={busyId === schedule.id}
-              onEdit={() => setEditor(schedule)}
+              onEdit={() => onEditorChange(schedule)}
               onAct={(action) => void act(schedule, action)}
             />
           ))}
         </div>
       ) : null}
-    </section>
+    </>
   );
 }
 
@@ -250,9 +219,9 @@ function ReviewCard({
     <article className="rounded-xl border border-border bg-card p-4">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <h4 className="text-sm font-medium break-words">{schedule.title}</h4>
+          <h3 className="text-sm font-medium break-words">{schedule.title}</h3>
           <p className="mt-1 text-xs text-muted-foreground">
-            {recurrenceLabel(schedule.recurrence, schedule.timezone)}
+            Suggests next threads · {recurrenceLabel(schedule.recurrence, schedule.timezone)}
           </p>
         </div>
         <span className="rounded-full border border-border px-2 py-0.5 text-3xs text-muted-foreground">
@@ -301,7 +270,7 @@ function ReviewCard({
           disabled={!canEdit || busy}
           onClick={() => onAct("run")}
         >
-          <PlayIcon /> Review now
+          <PlayIcon /> Run now
         </Button>
         <Button size="xs" variant="ghost-muted" onClick={() => setHistoryOpen((value) => !value)}>
           <HistoryIcon /> History
@@ -371,7 +340,7 @@ function ReviewEditor({
       entry.isAvailable &&
       entry.snapshot.auth.status !== "unauthenticated",
   );
-  const [title, setTitle] = useState(schedule?.title ?? "Project review");
+  const [title, setTitle] = useState(schedule?.title ?? "Suggest next threads");
   const [instructions, setInstructions] = useState(
     schedule?.instructions ??
       "Review recent project threads against active Targets and propose useful next threads with evidence.",
@@ -435,9 +404,12 @@ function ReviewEditor({
       onSubmit={submit}
       className="mt-4 space-y-3 rounded-xl border border-border bg-muted/25 p-4"
     >
-      <h4 className="text-sm font-medium">
-        {schedule ? "Edit project review" : "New project review"}
-      </h4>
+      <h3 className="text-sm font-medium">
+        {schedule ? "Edit suggestion schedule" : "Suggest next threads"}
+      </h3>
+      <p className="text-xs text-muted-foreground">
+        Find ideas from active Targets and recent threads. You choose which suggestions to use.
+      </p>
       <label className="block space-y-1 text-xs font-medium">
         Title
         <Input
@@ -448,7 +420,7 @@ function ReviewEditor({
         />
       </label>
       <label className="block space-y-1 text-xs font-medium">
-        Review guidance
+        Instructions
         <Textarea
           value={instructions}
           onChange={(event) => setInstructions(event.target.value)}
@@ -469,7 +441,7 @@ function ReviewEditor({
       </label>
       {mode === "interval" ? (
         <label className="block space-y-1 text-xs font-medium">
-          Minutes between reviews
+          Minutes between runs
           <Input
             type="number"
             min={15}
@@ -528,7 +500,7 @@ function ReviewEditor({
           />
         ) : (
           <p className="text-muted-foreground">
-            Connect an available Codex or Claude provider to schedule reviews.
+            Connect an available Codex or Claude provider to schedule suggestions.
           </p>
         )}
         {selected && !selectedAvailable ? (
@@ -545,7 +517,7 @@ function ReviewEditor({
       </label>
       <div className="flex gap-2">
         <Button size="sm" type="submit" disabled={busy || !selectedAvailable || !title.trim()}>
-          Save review
+          Save task
         </Button>
         <Button size="sm" variant="ghost" onClick={onCancel}>
           Cancel

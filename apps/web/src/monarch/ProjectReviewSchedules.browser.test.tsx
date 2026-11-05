@@ -96,11 +96,16 @@ it("saves a project review with an explicit model and does not run it", async ()
   mocks.schedules.length = 0;
   mocks.command.mockClear();
   await using screen = await render(
-    <ProjectReviewSchedules projectRef={projectRef} archived={false} />,
+    <ProjectReviewSchedules
+      projectRef={projectRef}
+      archived={false}
+      editor="new"
+      onEditorChange={vi.fn()}
+      showEmpty={true}
+    />,
   );
-  await userEvent.click(screen.getByRole("button", { name: "Add review" }));
   await expect.element(screen.getByRole("button", { name: "Models: codex" })).toBeVisible();
-  await userEvent.click(screen.getByRole("button", { name: "Save review" }));
+  await userEvent.click(screen.getByRole("button", { name: "Save task" }));
   await vi.waitFor(() => expect(mocks.command).toHaveBeenCalled());
   expect(mocks.command.mock.calls[0]?.[0]).toBe("upsert");
   expect(mocks.command.mock.calls[0]?.[1]).toMatchObject({
@@ -114,7 +119,7 @@ it("saves a project review with an explicit model and does not run it", async ()
   expect(mocks.command.mock.calls.some(([name]) => name === "runNow")).toBe(false);
 });
 
-it("runs a saved review only from Review now", async () => {
+it("runs a saved suggestion schedule only from Run now", async () => {
   mocks.command.mockClear();
   mocks.schedules.splice(0, mocks.schedules.length, {
     id: "review-1",
@@ -132,10 +137,16 @@ it("runs a saved review only from Review now", async () => {
     lastRunError: null,
   });
   await using screen = await render(
-    <ProjectReviewSchedules projectRef={projectRef} archived={false} />,
+    <ProjectReviewSchedules
+      projectRef={projectRef}
+      archived={false}
+      editor={null}
+      onEditorChange={vi.fn()}
+      showEmpty={true}
+    />,
   );
   expect(mocks.command).not.toHaveBeenCalled();
-  await userEvent.click(screen.getByRole("button", { name: "Review now" }));
+  await userEvent.click(screen.getByRole("button", { name: "Run now" }));
   await vi.waitFor(() => expect(mocks.command).toHaveBeenCalled());
   expect(mocks.command.mock.calls[0]).toMatchObject([
     "runNow",
