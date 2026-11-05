@@ -23,8 +23,6 @@ import { resolveSidebarState, type ResponsiveSidebarState } from "./sidebarState
 import * as Schema from "effect/Schema";
 import { announceSidebarVisibility } from "~/lib/accessibilityAnnouncements";
 
-const SIDEBAR_COOKIE_NAME = "monarch_sidebar_state";
-const SIDEBAR_COOKIE_MAX_AGE = 60 * 60 * 24 * 7;
 const SIDEBAR_WIDTH = "16rem";
 const SIDEBAR_WIDTH_MOBILE = "calc(100vw - var(--spacing(3)))";
 const SIDEBAR_WIDTH_ICON = "3rem";
@@ -104,15 +102,6 @@ function isMobileViewport(): boolean {
   return typeof window !== "undefined" && window.matchMedia(SIDEBAR_MOBILE_QUERY).matches;
 }
 
-async function persistSidebarOpen(open: boolean) {
-  await cookieStore.set({
-    expires: Date.now() + SIDEBAR_COOKIE_MAX_AGE * 1000,
-    name: SIDEBAR_COOKIE_NAME,
-    path: "/",
-    value: String(open),
-  });
-}
-
 // An offcanvas sidebar turns inert once collapsed, which drops focus to the body.
 function moveFocusOutOfCollapsingSidebar() {
   const sidebar = document.activeElement?.closest<HTMLElement>(
@@ -149,7 +138,6 @@ function createSidebarOpenStore(defaultOpen: boolean) {
       if (!isMobileViewport()) announceSidebarVisibility(open);
       publish({ ...state, open });
     }
-    void persistSidebarOpen(open);
   };
   const setOpenMobile = (openMobile: boolean) => {
     if (openMobile !== state.openMobile) publish({ ...state, openMobile });

@@ -33,19 +33,6 @@ function Harness(props: { readonly onResize?: (width: number) => void }) {
 }
 
 describe("Sidebar", () => {
-  it("persists the desktop open state as a valid cookie", async () => {
-    await page.viewport(1280, 800);
-    await cookieStore.delete("monarch_sidebar_state");
-    await using screen = await render(<Harness />, { router: false /* no routes involved */ });
-
-    await userEvent.click(screen.getByRole("button", { name: "Collapse" }));
-
-    await vi.waitFor(async () => {
-      expect((await cookieStore.get("monarch_sidebar_state"))?.value).toBe("false");
-    });
-    await cookieStore.delete("monarch_sidebar_state");
-  });
-
   it("hands focus to the outside trigger when it collapses around the focused control", async () => {
     await page.viewport(1280, 800);
     await using screen = await render(<Harness />, { router: false /* no routes involved */ });
