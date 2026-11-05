@@ -254,8 +254,9 @@ export function MonarchWorkspace({
           >
             <div
               className={cn(
-                "flex min-h-[38px] items-center justify-between gap-2 border-b border-border px-2.5 py-1 @max-[1001px]/monarch:min-h-(--workspace-topbar-height) @max-[1001px]/monarch:pl-(--workspace-titlebar-content-left)",
-                expanded && "pl-(--workspace-titlebar-content-left)",
+                "flex min-h-[38px] items-center justify-between gap-2 border-b border-border px-2.5 py-1",
+                !boardVisible &&
+                  "min-h-(--workspace-topbar-height) pl-(--workspace-titlebar-content-left)",
               )}
             >
               <Button
