@@ -12,7 +12,11 @@ import {
 } from "react";
 
 import { observeResize } from "../lib/observeResize";
-import { timelineConnectionPoints, type TimelineMarkerPoint } from "./projectTimelineGeometry";
+import {
+  timelineWires,
+  type TimelineWire,
+  type TimelineMarkerPoint,
+} from "./projectTimelineGeometry";
 import styles from "./ProjectTimeline.module.css";
 
 function timelineEntityKey(event: Pick<MonarchTimelineEvent, "entityKind" | "entityId">) {
@@ -91,20 +95,6 @@ function inlineTransition(event: MonarchTimelineEvent) {
   return event.action;
 }
 
-type Connection = {
-  id: string;
-  path: string;
-  sent: boolean;
-  sourceId: string;
-  destinationId: string;
-};
-
-function connect(source: TimelineMarkerPoint, destination: TimelineMarkerPoint) {
-  return timelineConnectionPoints(source, destination)
-    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
-    .join(" ");
-}
-
 export interface ProjectTimelineProps {
   timeline: MonarchTimelineResult;
   selectedNodeId?: string | null;
@@ -132,9 +122,10 @@ export function ProjectTimeline({
   const [localHover, setLocalHover] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [visible, setVisible] = useState(true);
-  const [geometry, setGeometry] = useState({ width: 0, height: 0, paths: [] as Connection[] });
+  const [geometry, setGeometry] = useState({ width: 0, height: 0, paths: [] as TimelineWire[] });
   const graphRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const axisRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const markers = useRef(new Map<string, HTMLSpanElement>());
   const initiallyPositioned = useRef(false);
@@ -199,45 +190,36 @@ export function ProjectTimeline({
     markers.current.get(next.id)?.closest("button")?.focus({ preventScroll: true });
   }
 
-  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Measures rendered marker centers to keep SVG connections aligned with the DOM.
+  // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Row bounds can change independently of the canvas when text wraps or details open.
   useLayoutEffect(() => {
     const graph = graphRef.current;
     if (!graph) return;
+    const rows = Array.from(graph.querySelectorAll<HTMLElement>("[data-timeline-row]"));
     const measure = () => {
       const bounds = graph.getBoundingClientRect();
       const positions = new Map<string, TimelineMarkerPoint>();
       for (const [id, marker] of markers.current) {
         const rect = marker.getBoundingClientRect();
         const row = marker.closest("[data-timeline-row]")?.getBoundingClientRect();
-        if (!row) continue;
+        const label = marker.nextElementSibling?.getBoundingClientRect();
+        if (!row || !label) continue;
         positions.set(id, {
           x: rect.left + rect.width / 2 - bounds.left,
           y: rect.top + rect.height / 2 - bounds.top,
           rowTop: row.top - bounds.top,
+          rowBottom: row.bottom - bounds.top,
+          radius: rect.width / 2,
+          labelGap: Math.max(0, label.left - rect.right),
         });
       }
-      const eventsById = new Map(timeline.events.map((event) => [event.id, event]));
-      const paths: Connection[] = [];
-      for (const event of timeline.events) {
-        const destination = positions.get(event.id);
-        if (!destination) continue;
-        for (const parentId of event.parentIds) {
-          const source = positions.get(parentId);
-          const parent = eventsById.get(parentId);
-          if (!source || !parent) continue;
-          paths.push({
-            id: `${parentId}:${event.id}`,
-            sourceId: parentId,
-            destinationId: event.id,
-            path: connect(source, destination),
-            sent: parent.family === "suggestion" && event.family === "thread",
-          });
-        }
-      }
-      setGeometry({ width: bounds.width, height: bounds.height, paths });
+      setGeometry({
+        width: bounds.width,
+        height: bounds.height,
+        paths: timelineWires(timeline.events, positions),
+      });
     };
     measure();
-    return observeResize(graph, measure);
+    return observeResize([graph, ...rows], measure);
   }, [timeline.events, graphRef, markers]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Initially positions the DOM viewport at current activity rather than old history.
@@ -259,7 +241,8 @@ export function ProjectTimeline({
     const bounds = viewport.getBoundingClientRect();
     const event = marker.closest("button")?.getBoundingClientRect();
     if (!event) return;
-    if (event.top < bounds.top + 8) viewport.scrollTop += event.top - bounds.top - 8;
+    const visibleTop = bounds.top + (axisRef.current?.offsetHeight ?? 0) + 8;
+    if (event.top < visibleTop) viewport.scrollTop += event.top - visibleTop;
     else if (event.bottom > bounds.bottom - 8)
       viewport.scrollTop += event.bottom - bounds.bottom + 8;
   }, [selectedEventId, markers]);
@@ -332,12 +315,6 @@ export function ProjectTimeline({
           </button>
         </div>
       </div>
-      <div className={styles["project-timeline-axis"]} aria-hidden="true">
-        <span />
-        <span>Project</span>
-        <span>Proposed threads</span>
-        <span>Work</span>
-      </div>
       <div
         ref={scrollRef}
         className={styles["project-timeline-scroll"]}
@@ -345,11 +322,28 @@ export function ProjectTimeline({
         aria-label="Timeline events"
         aria-describedby={keyboardHelpId}
       >
+        <div
+          className={styles["project-timeline-axis"]}
+          ref={axisRef}
+          data-timeline-axis
+          aria-hidden="true"
+        >
+          <span />
+          <span>Project</span>
+          <span>Suggestions</span>
+          <span>Work</span>
+        </div>
         <p className="sr-only" id={keyboardHelpId}>
           Use Up and Down arrow keys to move between events. Home and End move to the first and last
           event. Select an event to see its details below the graph.
         </p>
-        <div className={styles["project-timeline-canvas"]} ref={graphRef}>
+        <div className={styles["project-timeline-canvas"]} ref={graphRef} data-timeline-canvas>
+          {timeline.events.length > 0 && (
+            <div className={styles["project-timeline-spines"]} aria-hidden="true">
+              <span data-timeline-spine="project" />
+              <span data-timeline-spine="work" />
+            </div>
+          )}
           {geometry.width > 0 ? (
             <svg
               className={styles["project-timeline-wires"]}
@@ -357,18 +351,28 @@ export function ProjectTimeline({
               preserveAspectRatio="none"
               aria-hidden="true"
             >
-              {geometry.paths.map((connection) => (
-                <path
-                  key={connection.id}
-                  d={connection.path}
-                  data-sent={connection.sent || undefined}
-                  data-highlighted={
-                    highlightedIds.has(connection.sourceId) ||
-                    highlightedIds.has(connection.destinationId) ||
-                    undefined
-                  }
-                />
-              ))}
+              {geometry.paths
+                .filter((connection) =>
+                  connection.kind === "revision"
+                    ? highlightedIds.has(connection.from) || highlightedIds.has(connection.to)
+                    : connection.kind !== "source" ||
+                      connection.from === selectedId ||
+                      connection.to === selectedId,
+                )
+                .map((connection) => (
+                  <path
+                    key={`${connection.kind}:${connection.from}:${connection.to}`}
+                    d={connection.path}
+                    data-connection={connection.kind}
+                    data-source-event={connection.from}
+                    data-destination-event={connection.to}
+                    data-highlighted={
+                      highlightedIds.has(connection.from) ||
+                      highlightedIds.has(connection.to) ||
+                      undefined
+                    }
+                  />
+                ))}
             </svg>
           ) : null}
           {timeline.events.length === 0 ? (
@@ -388,7 +392,9 @@ export function ProjectTimeline({
             return (
               <div key={event.id}>
                 {!previous || eventDay(previous) !== day ? (
-                  <div className={styles["project-timeline-day"]}>{day}</div>
+                  <div className={styles["project-timeline-day"]}>
+                    <span>{day}</span>
+                  </div>
                 ) : null}
                 <div
                   className={styles["project-timeline-row"]}
@@ -428,6 +434,7 @@ export function ProjectTimeline({
                   >
                     <span
                       className={styles["project-timeline-marker"]}
+                      data-timeline-marker={event.id}
                       ref={(element) => {
                         if (element) markers.current.set(event.id, element);
                         else markers.current.delete(event.id);
