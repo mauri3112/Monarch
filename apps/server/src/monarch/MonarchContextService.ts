@@ -19,6 +19,7 @@ import {
   type ProjectId,
   type ThreadId,
 } from "@t3tools/contracts";
+import { DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION } from "@t3tools/shared/monarchContext";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -72,6 +73,7 @@ const DEFAULT_SETTINGS: MonarchContextSettings = {
   suggestAfterTargetChange: true,
   paused: false,
   modelSelection: null,
+  journalModelSelection: DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION,
   maxUpdatesPerDay: 6,
   maxOpenSuggestions: 10,
   excludedThreadIds: [],
@@ -89,7 +91,7 @@ const decodeEntry = Schema.decodeEffect(Schema.fromJsonString(MonarchContextEntr
 const encodeTargetFingerprint = Schema.encodeEffect(
   Schema.fromJsonString(Schema.Array(Schema.Struct({ id: Schema.String, revision: Schema.Int }))),
 );
-const materialKey = (entry: MonarchGeneratedContextEntry) =>
+export const materialKey = (entry: MonarchGeneratedContextEntry) =>
   `${entry.kind}|${entry.scope}|${entry.branch ?? ""}|${entry.title.trim().toLocaleLowerCase("en-US").replace(/\s+/g, " ")}|${entry.body.trim().toLocaleLowerCase("en-US").replace(/\s+/g, " ")}`;
 const now = DateTime.now.pipe(Effect.map(DateTime.formatIso));
 const storage = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
@@ -146,7 +148,10 @@ const make = Effect.gen(function* () {
     return {
       revision: row.revision,
       settingsRevision: row.settings_revision,
-      settings: yield* decodeSettings(row.settings_json).pipe(storage),
+      settings: {
+        ...DEFAULT_SETTINGS,
+        ...(yield* decodeSettings(row.settings_json).pipe(storage)),
+      },
       enabledAt: row.enabled_at,
       updatedAt: row.updated_at,
     };
@@ -396,7 +401,7 @@ const make = Effect.gen(function* () {
         storage,
       );
       const targetFingerprint = yield* encodeTargetFingerprint(targetRows).pipe(storage);
-      yield* sql`UPDATE monarch_project_context SET settings_json = ${yield* encodeSettings(input.settings).pipe(storage)},
+      yield* sql`UPDATE monarch_project_context SET settings_json = ${yield* encodeSettings({ ...state.settings, ...input.settings }).pipe(storage)},
       settings_revision = settings_revision + 1, revision = revision + 1, updated_at = ${yield* now}, enabled_at = ${enabledAt},
       enabled_sequence = CASE WHEN ${input.settings.enabled ? 1 : 0} = 0 THEN NULL WHEN ${state.settings.enabled ? 1 : 0} = 0 THEN ${sequence?.sequence ?? 0} ELSE enabled_sequence END,
       enabled_target_fingerprint = CASE WHEN ${input.settings.enabled ? 1 : 0} = 0 THEN NULL WHEN ${state.settings.enabled ? 1 : 0} = 0 THEN ${targetFingerprint} ELSE enabled_target_fingerprint END

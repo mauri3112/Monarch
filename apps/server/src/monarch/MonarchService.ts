@@ -11,6 +11,10 @@ import {
   MonarchUseSuggestionInput,
   NextThreadSuggestion,
   ThreadId,
+  type MonarchTimelineInput,
+  type MonarchTimelineHistoryInput,
+  type MonarchTimelineHistoryResult,
+  MonarchTimelineResult,
   type MonarchProjectState,
   type ProjectId,
 } from "@t3tools/contracts";
@@ -25,9 +29,21 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
+import * as SqliteClient from "@t3tools/shared/nodeSqliteClient";
+import { readTimeline, readTimelineHistory } from "./MonarchTimeline.ts";
+
 export class MonarchService extends Context.Service<
   MonarchService,
   {
+    readonly timelineHistory: (
+      input: MonarchTimelineHistoryInput,
+    ) => Effect.Effect<MonarchTimelineHistoryResult, MonarchError>;
+    readonly timeline: (
+      input: MonarchTimelineInput,
+    ) => Effect.Effect<MonarchTimelineResult, MonarchError>;
+    readonly watchTimeline: (
+      input: MonarchTimelineInput,
+    ) => Stream.Stream<MonarchTimelineResult, MonarchError>;
     readonly list: (input: MonarchProjectInput) => Effect.Effect<MonarchProjectState, MonarchError>;
     readonly watch: (
       input: MonarchProjectInput,
@@ -63,6 +79,7 @@ const now = Clock.currentTimeMillis.pipe(
   Effect.map((millis) => DateTime.formatIso(DateTime.makeUnsafe(millis))),
 );
 const isMonarchError = Schema.is(MonarchError);
+const sameTimeline = Schema.toEquivalence(MonarchTimelineResult);
 const decodeTarget = Schema.decodeEffect(Schema.fromJsonString(MonarchTarget));
 const encodeTarget = Schema.encodeEffect(Schema.fromJsonString(MonarchTarget));
 const decodeSuggestion = Schema.decodeEffect(Schema.fromJsonString(NextThreadSuggestion));
@@ -454,7 +471,39 @@ const make = Effect.gen(function* () {
     storage,
     Effect.tap(() => changed),
   );
+  const timeline = (input: MonarchTimelineInput) =>
+    readTimeline(input).pipe(
+      sql.withTransaction,
+      SqliteClient.readOnly,
+      Effect.provideService(SqlClient.SqlClient, sql),
+      storage,
+    );
+  // data_version sees other connections; total_changes also covers the single-connection in-memory database.
+  const timelineVersion = sql<{
+    version: string;
+  }>`SELECT data_version || ':' || total_changes() || ':' || date('now') AS version FROM pragma_data_version`.pipe(
+    sql.withTransaction,
+    SqliteClient.readOnly,
+    storage,
+    Effect.map((rows) => rows[0]!.version),
+  );
+  const timelineHistory = (input: MonarchTimelineHistoryInput) =>
+    readTimelineHistory(input).pipe(
+      sql.withTransaction,
+      SqliteClient.readOnly,
+      Effect.provideService(SqlClient.SqlClient, sql),
+      storage,
+    );
   return MonarchService.of({
+    timeline,
+    timelineHistory,
+    watchTimeline: (input) =>
+      Stream.tick("3 seconds").pipe(
+        Stream.mapEffect(() => timelineVersion),
+        Stream.changes,
+        Stream.mapEffect(() => timeline(input)),
+        Stream.changesWith(sameTimeline),
+      ),
     list,
     createTarget,
     updateTarget,

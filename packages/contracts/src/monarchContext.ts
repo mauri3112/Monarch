@@ -20,6 +20,7 @@ export const MonarchContextSettings = Schema.Struct({
   suggestAfterTargetChange: Schema.Boolean,
   paused: Schema.Boolean,
   modelSelection: Schema.NullOr(ModelSelection),
+  journalModelSelection: Schema.optionalKey(ModelSelection),
   maxUpdatesPerDay: PositiveInt.check(Schema.isLessThanOrEqualTo(100)),
   maxOpenSuggestions: PositiveInt.check(Schema.isLessThanOrEqualTo(100)),
   excludedThreadIds: Schema.Array(ThreadId).check(Schema.isMaxLength(200)),

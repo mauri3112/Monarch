@@ -24,7 +24,12 @@ import { useProject, useQuietThreadProjection, useQuietThreadShell } from "../st
 import { useEnvironmentShellStatus } from "../state/shell";
 import type { ThreadRouteTarget } from "../threadRoutes";
 import { ProjectBoard } from "./ProjectBoard";
-import { MonarchDockContext, type MonarchDockKind } from "./MonarchDockContext";
+import {
+  MonarchDockContext,
+  type MonarchDockKind,
+  type TimelineSelection,
+} from "./MonarchDockContext";
+import { ProjectActivityDock } from "./ProjectActivityDock";
 import { ProjectContextIncludedNotice } from "./ProjectContextIncludedNotice";
 
 export function MonarchWorkspace({
@@ -62,8 +67,20 @@ export function MonarchWorkspace({
       : routeProjectRef;
   const project = useProject(projectRef);
   const shellStatus = useEnvironmentShellStatus(projectRef?.environmentId ?? null);
+  const [actionHost, setActionHost] = useState<HTMLElement | null>(null);
+  const [timelineExpanded, setTimelineExpanded] = useState(false);
   const [expanded, setExpanded] = useState(false);
   const scopeKey = projectRef ? scopedProjectKey(projectRef) : "none";
+  const [hoverState, setHoveredEntityKey] = useState<{ scopeKey: string; value: string | null }>({
+    scopeKey,
+    value: null,
+  });
+  const hoveredEntityKey = hoverState.scopeKey === scopeKey ? hoverState.value : null;
+  const [selectionState, setSelection] = useState<{
+    scopeKey: string;
+    value: TimelineSelection | null;
+  }>({ scopeKey, value: null });
+  const selection = selectionState.scopeKey === scopeKey ? selectionState.value : null;
   const targetKey =
     target?.kind === "server" ? scopedThreadKey(target.threadRef) : (target?.draftId ?? null);
   const [dockState, setDockState] = useState<{
@@ -73,7 +90,7 @@ export function MonarchWorkspace({
     branch: string | null;
   }>({
     scopeKey,
-    kind: null,
+    kind: target === null ? "timeline" : null,
     targetKey: null,
     branch: null,
   });
@@ -81,7 +98,12 @@ export function MonarchWorkspace({
     dockState.scopeKey !== scopeKey ||
     (dockState.kind === "included" && dockState.targetKey !== targetKey)
   ) {
-    setDockState({ scopeKey, kind: null, targetKey: null, branch: null });
+    setDockState({
+      scopeKey,
+      kind: target === null ? "timeline" : null,
+      targetKey: null,
+      branch: null,
+    });
   }
   const activeDock =
     dockState.scopeKey === scopeKey &&
@@ -118,6 +140,15 @@ export function MonarchWorkspace({
   });
   const dockController = {
     activeKind: activeDock,
+    selection,
+    hoveredEntityKey,
+    hoverEntity: (value: string | null) => setHoveredEntityKey({ scopeKey, value }),
+    selectEntity: (next: TimelineSelection | null) => {
+      setSelection({ scopeKey, value: next });
+      setDockState({ scopeKey, kind: "timeline", targetKey: null, branch: null });
+    },
+    actionHost,
+    setActionHost,
     host: dockHost,
     open: (kind: MonarchDockKind, branch?: string | null) =>
       setDockState({
@@ -140,17 +171,29 @@ export function MonarchWorkspace({
   const dockInlineSize = usePreviewPanelInlineSize({
     container: target === null ? workspaceElement : threadRowElement,
     widthStorageKey: `monarch:project-dock-width:${scopeKey}`,
-    defaultWidth: 420,
+    defaultWidth: activeDock === "timeline" ? 540 : 420,
   });
   const dockPane =
     activeDock !== null && projectRef ? (
       <PreviewPanelShell
         mode={compactDock ? "embedded" : "inline"}
-        inlineSize={dockInlineSize}
+        inlineSize={
+          timelineExpanded && activeDock === "timeline"
+            ? { ...dockInlineSize, width: Math.max(420, workspaceWidth - 320) }
+            : dockInlineSize
+        }
         workspaceArea
         workspaceLabel="Project panel"
       >
         <div ref={setDockHost} className="h-full min-h-0 min-w-0" data-monarch-dock-host>
+          {activeDock === "timeline" ? (
+            <ProjectActivityDock
+              key={scopeKey}
+              projectRef={projectRef}
+              expanded={timelineExpanded}
+              onToggleExpanded={() => setTimelineExpanded((value) => !value)}
+            />
+          ) : null}
           {activeDock === "included" ? (
             <ProjectContextIncludedNotice
               projectRef={projectRef}

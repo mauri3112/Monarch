@@ -76,6 +76,12 @@ to override its environment defaults. Worktree directories keep their original n
 If generation fails, or a custom name is invalid or already taken, the temporary
 branch name remains.
 
+## Project activity on desktop and web
+
+Open a project and select an item under **Targets**, **Threads**, **Suggested next threads**, or **Scheduled tasks**. Its timeline event opens on the right. Click a shape to inspect the time, source, and actions. The middle lane holds proposals. **Use** prepares a draft. Sending it links the proposal to the new thread in the Work lane.
+
+To journal completed turns, open **Settings** beside **Suggested next threads**, enable automatic updates, and turn on **Journal completed work**. The journal model starts at Codex GPT-6-Luna with xhigh effort. The suggestion model is a separate choice. To journal earlier work, select the threads in **Project context → Build context**. Re-analysis saves another revision and applies your current journal model.
+
 ## Scheduled tasks on mobile
 
 Open **Settings → Scheduled tasks** to create scheduled tasks or manage existing

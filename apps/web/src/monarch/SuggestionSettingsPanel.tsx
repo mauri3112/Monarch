@@ -1,16 +1,21 @@
 import { useAtomValue } from "@effect/atom-react";
 import {
+  isReasoningSelect,
+  selectableProviderOptionChoices,
+} from "@t3tools/client-runtime/model-traits";
+import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 import {
   MONARCH_REVIEW_DRIVER_KINDS,
-  type ModelSelection,
   type MonarchContextSettings,
   type MonarchReviewSchedule,
   type ScopedProjectRef,
   type ThreadId,
 } from "@t3tools/contracts";
+import { DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION } from "@t3tools/shared/monarchContext";
+import { getModelSelectionStringOptionValue } from "@t3tools/shared/model";
 import { PlusIcon, RotateCcwIcon } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 
@@ -266,7 +271,7 @@ export function SuggestionSettingsPanel({
                     {activity
                       ? state.settings.modelSelection
                         ? `${activity.updatesToday} of ${activity.maxUpdatesPerDay} updates today. Each update may make up to two model requests.`
-                        : `${activity.updatesToday} updates today. Choose an update model to apply project limits.`
+                        : `${activity.updatesToday} updates today. Choose a suggestion model to run a review.`
                       : "Loading activity…"}
                   </p>
                 </div>
@@ -305,7 +310,7 @@ export function SuggestionSettingsPanel({
               </div>
               {!state.settings.modelSelection ? (
                 <p className="mt-2 text-xs text-muted-foreground">
-                  Choose and save an update model before refreshing this project.
+                  Choose and save a suggestion model before refreshing this project.
                 </p>
               ) : null}
               {activity?.pending ? (
@@ -408,11 +413,38 @@ function SettingsForm({
         selectedEntry ? (selected?.model ?? "") : "",
       )
     : new Map();
+  const journal = draft.journalModelSelection ?? DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION;
+  const journalEntry = entries.find((entry) => entry.instanceId === journal.instanceId);
+  const journalModel = journalEntry?.models.find(
+    (model) => model.slug === journal.model || model.aliases?.includes(journal.model),
+  );
+  const journalPickerInstance = journalEntry?.instanceId ?? entries[0]?.instanceId;
+  const journalOptions = getCustomModelOptionsByInstance(
+    providerSettings,
+    providers,
+    journal.instanceId,
+    journal.model,
+  );
+  const reasoning = journalModel?.capabilities?.optionDescriptors?.find(isReasoningSelect);
+  const effortId =
+    reasoning?.id ?? (journalEntry?.driverKind === "claudeAgent" ? "effort" : "reasoningEffort");
+  const effort = getModelSelectionStringOptionValue(journal, effortId);
+  const effortChoices = reasoning ? selectableProviderOptionChoices(reasoning) : [];
+  const supportedEffort = !effort || effortChoices.some((choice) => choice.id === effort);
+  const journalAvailable = !!journalModel && supportedEffort;
+  const needsJournal =
+    (draft.enabled && draft.autoUpdateContext) ||
+    draft.journalModelSelection !== settings.journalModelSelection;
+  const valid =
+    (!draft.enabled || !!selected) &&
+    (draft.paused ||
+      (((!draft.enabled && !selected) || selectedAvailable) &&
+        (!needsJournal || journalAvailable)));
   const update = (patch: Partial<MonarchContextSettings>) =>
     setDraft((current) => ({ ...current, ...patch }));
   const save = (event: FormEvent) => {
     event.preventDefault();
-    if ((draft.enabled || selected) && !selectedAvailable) return;
+    if (!valid) return;
     onSave(draft);
   };
   const excluded = new Set(draft.excludedThreadIds);
@@ -444,7 +476,7 @@ function SettingsForm({
             onChange={(value) => update({ enabled: value })}
           />
           <SettingToggle
-            label="Capture project context after work"
+            label="Journal completed work"
             checked={draft.autoUpdateContext}
             disabled={!canEdit || !draft.enabled}
             onChange={(value) => update({ autoUpdateContext: value })}
@@ -482,7 +514,7 @@ function SettingsForm({
         </p>
         <div className="mt-3 space-y-3">
           <div className="space-y-1 text-xs font-medium">
-            <span>Update model</span>
+            <span>Suggestion model</span>
             {activeInstanceId ? (
               <ProviderModelPicker
                 environmentId={projectRef.environmentId}
@@ -492,9 +524,16 @@ function SettingsForm({
                 instanceEntries={entries}
                 modelOptionsByInstance={modelOptions}
                 isComposerOwned={false}
+                {...(!selected ? { triggerLabel: "Choose model" } : {})}
+                triggerAriaLabel="Choose suggestion model"
                 disabled={!canEdit || busy}
                 onInstanceModelChange={(instanceId, model) =>
-                  update({ modelSelection: { instanceId, model } as ModelSelection })
+                  update({
+                    modelSelection:
+                      selected?.instanceId === instanceId && selected.model === model
+                        ? selected
+                        : { instanceId, model },
+                  })
                 }
               />
             ) : (
@@ -504,7 +543,7 @@ function SettingsForm({
             )}
             {!selected ? (
               <p className="font-normal text-muted-foreground">
-                Choose a model for project updates, including manual refresh and context building.
+                Choose a model to review project context and suggest next threads.
               </p>
             ) : null}
             {selected && !selectedAvailable ? (
@@ -517,11 +556,84 @@ function SettingsForm({
                 size="xs"
                 type="button"
                 variant="ghost-muted"
+                disabled={!canEdit || busy}
                 onClick={() => update({ modelSelection: null })}
               >
                 Clear model
               </Button>
             ) : null}
+          </div>
+          <div className="space-y-1 text-xs">
+            <span className="font-medium">Thread journal model</span>
+            <div className="flex flex-wrap items-center gap-2">
+              {journalPickerInstance ? (
+                <ProviderModelPicker
+                  environmentId={projectRef.environmentId}
+                  activeInstanceId={journalPickerInstance}
+                  model={journalEntry ? journal.model : ""}
+                  triggerLabel={journalModel?.name ?? journal.model}
+                  triggerAriaLabel="Choose thread journal model"
+                  lockedProvider={null}
+                  instanceEntries={entries}
+                  modelOptionsByInstance={journalOptions}
+                  isComposerOwned={false}
+                  disabled={!canEdit || busy}
+                  onInstanceModelChange={(instanceId, model) => {
+                    if (journal.instanceId === instanceId && journal.model === model) return;
+                    update({
+                      journalModelSelection:
+                        instanceId === DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION.instanceId &&
+                        model === DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION.model
+                          ? DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION
+                          : { instanceId, model },
+                    });
+                  }}
+                />
+              ) : (
+                <span>{journal.model}</span>
+              )}
+              {(effortChoices.length > 0 || effort) && (
+                <label className="flex items-center gap-1.5">
+                  Effort
+                  <select
+                    aria-label="Thread journal reasoning effort"
+                    className="rounded-md border border-border bg-background px-1.5 py-1"
+                    disabled={!canEdit || busy || !journalModel}
+                    value={effort ?? ""}
+                    onChange={(event) => {
+                      const value = event.target.value;
+                      const others =
+                        journal.options?.filter((option) => option.id !== effortId) ?? [];
+                      update({
+                        journalModelSelection: {
+                          ...journal,
+                          options: value ? [...others, { id: effortId, value }] : others,
+                        },
+                      });
+                    }}
+                  >
+                    <option value="">Automatic</option>
+                    {!supportedEffort && <option value={effort}>{effort} (unavailable)</option>}
+                    {effortChoices.map((choice) => (
+                      <option key={choice.id} value={choice.id}>
+                        {choice.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+            </div>
+            <p className="text-muted-foreground">
+              Saves a short account of each eligible turn for future suggestions. Changes apply to
+              future journals.
+            </p>
+            {!journalAvailable && (
+              <p className="text-warning-foreground">
+                {journalModel
+                  ? "Choose an available reasoning effort."
+                  : "Connect the journal provider or choose an available model."}
+              </p>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-3">
             <label className="block space-y-1 text-xs font-medium">
@@ -602,11 +714,7 @@ function SettingsForm({
           />
         </label>
       </section>
-      <Button
-        size="sm"
-        type="submit"
-        disabled={!canEdit || busy || ((draft.enabled || !!selected) && !selectedAvailable)}
-      >
+      <Button size="sm" type="submit" disabled={!canEdit || busy || !valid}>
         Save settings
       </Button>
     </form>

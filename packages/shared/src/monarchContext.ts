@@ -1,4 +1,14 @@
-import type { MonarchContextBrief } from "@t3tools/contracts";
+import {
+  ProviderInstanceId,
+  type MonarchContextBrief,
+  type ModelSelection,
+} from "@t3tools/contracts";
+
+export const DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION: ModelSelection = {
+  instanceId: ProviderInstanceId.make("codex"),
+  model: "gpt-6-luna",
+  options: [{ id: "reasoningEffort", value: "xhigh" }],
+};
 
 export const PROJECT_CONTEXT_MAX_BYTES = 4_096;
 const MAX_ENTRY_IDS = 8;

@@ -1,4 +1,10 @@
 import {
+  MonarchTimelineInput,
+  MonarchTimelineResult,
+  MonarchTimelineHistoryInput,
+  MonarchTimelineHistoryResult,
+} from "./monarchTimeline.ts";
+import {
   MonarchContextProjectInput,
   MonarchContextState,
   MonarchContextUpdateSettingsInput,
@@ -459,6 +465,8 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  monarchTimelineHistory: "monarch.timeline.history",
+  monarchTimelineSubscribe: "monarch.timeline.subscribe",
   monarchContinuityRefresh: "monarch.continuity.refresh",
   monarchContinuityActivity: "monarch.continuity.activity",
   monarchContinuitySubscribe: "monarch.continuity.subscribe",
@@ -770,6 +778,17 @@ const WsMonarchContinuityActivityRpc = Rpc.make(WS_METHODS.monarchContinuityActi
   payload: MonarchContextProjectInput,
   success: MonarchProjectActivityResult,
   error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+const WsMonarchTimelineHistoryRpc = Rpc.make(WS_METHODS.monarchTimelineHistory, {
+  payload: MonarchTimelineHistoryInput,
+  success: MonarchTimelineHistoryResult,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+});
+const WsMonarchTimelineSubscribeRpc = Rpc.make(WS_METHODS.monarchTimelineSubscribe, {
+  payload: MonarchTimelineInput,
+  success: MonarchTimelineResult,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+  stream: true,
 });
 const WsMonarchContinuitySubscribeRpc = Rpc.make(WS_METHODS.monarchContinuitySubscribe, {
   payload: MonarchContextProjectInput,
@@ -2259,6 +2278,8 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 export const WsRpcGroup = RpcGroup.make(
   WsMonarchContinuityRefreshRpc,
   WsMonarchContinuityActivityRpc,
+  WsMonarchTimelineHistoryRpc,
+  WsMonarchTimelineSubscribeRpc,
   WsMonarchContinuitySubscribeRpc,
   WsMonarchContinuitySourcesRpc,
   WsMonarchContextGetRpc,

@@ -76,4 +76,5 @@ export * from "./clientRpcPermissions.ts";
 export * from "./monarch.ts";
 export * from "./monarchContext.ts";
 
+export * from "./monarchTimeline.ts";
 export * from "./monarchSchedules.ts";

@@ -86,6 +86,7 @@ jobs:
         run: >-
           vp test run src/monarch/MonarchService.test.ts src/monarch/MonarchContextService.test.ts
           src/monarch/MonarchScheduler.test.ts src/monarch/ReviewContextBudget.test.ts
+          src/persistence/Migrations.test.ts
           src/mcp/toolkits/monarch/handlers.test.ts src/provider/AgentContextBudget.test.ts
           src/textGeneration/CodexTextGeneration.test.ts src/orchestration-v2/RunExecutionService.test.ts
       - name: Check project workspace and voice client

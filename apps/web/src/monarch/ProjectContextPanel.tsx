@@ -124,6 +124,7 @@ export function ProjectContextPanel({
   const [briefDraft, setBriefDraft] = useState("");
   const [editingEntry, setEditingEntry] = useState<MonarchContextEntry | "new" | null>(null);
   const [selectedSourceIds, setSelectedSourceIds] = useState<ReadonlySet<ThreadId> | null>(null);
+  const [reanalyze, setReanalyze] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -251,10 +252,18 @@ export function ProjectContextPanel({
     const queued = await runMutation("build", () =>
       refresh({
         environmentId: projectRef.environmentId,
-        input: { projectId: projectRef.projectId, mode: "build-context", threadIds },
+        input: {
+          projectId: projectRef.projectId,
+          mode: "build-context",
+          threadIds,
+          ...(reanalyze ? { reanalyze: true } : {}),
+        },
       }),
     );
-    if (queued) setNotice("Context build queued. New entries will appear here when it finishes.");
+    if (queued) {
+      setReanalyze(false);
+      setNotice("Context build queued. Follow its progress in the project timeline.");
+    }
   }
 
   async function excludeSource(threadId: ThreadId) {
@@ -547,8 +556,8 @@ export function ProjectContextPanel({
                 Build context
               </h3>
               <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                Choose up to 20 completed threads to add to queued project updates. Excluded threads
-                stay out.
+                Select up to 20 threads to journal their latest completed turns. Builds reuse saved
+                journals.
               </p>
               {sourcesQuery.error ? (
                 <p role="alert" className="mt-2 text-xs text-destructive">
@@ -590,12 +599,22 @@ export function ProjectContextPanel({
                   No completed project threads are available yet.
                 </p>
               )}
+              {validSelected.length > 0 && (
+                <label className="my-3 flex items-center gap-2 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={reanalyze}
+                    disabled={!canBuild || state.settings.paused || busy === "build"}
+                    onChange={(event) => setReanalyze(event.target.checked)}
+                  />
+                  Re-analyze selected turns and save new journal revisions
+                </label>
+              )}
               <Button
                 size="sm"
                 variant="outline"
                 disabled={
                   !canBuild ||
-                  !state.settings.modelSelection ||
                   state.settings.paused ||
                   busy === "build" ||
                   validSelected.length === 0
@@ -604,11 +623,6 @@ export function ProjectContextPanel({
               >
                 <BookOpenIcon /> {busy === "build" ? "Queuing…" : "Build context"}
               </Button>
-              {!state.settings.modelSelection ? (
-                <p className="mt-2 text-xs text-muted-foreground">
-                  Choose and save an update model in suggestion settings before building context.
-                </p>
-              ) : null}
               {state.settings.paused ? (
                 <p className="mt-2 text-xs text-muted-foreground">
                   Resume project updates in suggestion settings before building context.

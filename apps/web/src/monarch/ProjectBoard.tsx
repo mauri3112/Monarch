@@ -1,3 +1,4 @@
+import { ProjectOverviewRow } from "./ProjectOverviewRow";
 import {
   scopedProjectKey,
   scopedThreadKey,
@@ -9,7 +10,13 @@ import type {
 } from "@t3tools/client-runtime/state/models";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowUpRightIcon, BookOpenIcon, GitBranchIcon, PlusIcon } from "lucide-react";
+import {
+  ArrowUpRightIcon,
+  BookOpenIcon,
+  GitBranchIcon,
+  PlusIcon,
+  ActivityIcon,
+} from "lucide-react";
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -121,7 +128,7 @@ export function ProjectBoard({
 
   return (
     <div className="mx-auto w-full max-w-[1160px] overflow-y-auto px-5 pt-6 pb-12 sm:px-6">
-      <header className="mb-8">
+      <header className="mb-5">
         <span className="block text-2xs break-words text-muted-foreground">
           {environment?.label ?? "Environment unavailable"}
         </span>
@@ -145,6 +152,11 @@ export function ProjectBoard({
           >
             <BookOpenIcon /> Project context
           </Button>
+          {dock ? (
+            <Button variant="outline" onClick={() => dock.open("timeline")}>
+              <ActivityIcon /> Timeline
+            </Button>
+          ) : null}
           {actions}
         </div>
         {startError ? (
@@ -187,7 +199,7 @@ export function ProjectBoard({
         projectTitle={project.title}
         archived={project.archivedAt != null}
       >
-        <section aria-labelledby="monarch-threads-heading" className="border-t border-border pt-7">
+        <section aria-labelledby="monarch-threads-heading" className="border-t border-border pt-4">
           <div className="flex items-center gap-2.5">
             <h2 id="monarch-threads-heading" className="text-base font-medium tracking-tight">
               Threads
@@ -216,7 +228,7 @@ export function ProjectBoard({
               Showing saved threads. Waiting for this environment to reconnect.
             </p>
           ) : null}
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(min(260px,100%),1fr))] gap-3">
+          <div className="space-y-0.5">
             {shownThreads.map((thread) => (
               <ProjectThreadCard
                 key={scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))}
@@ -272,12 +284,26 @@ function ProjectThreadCard({
   selected: boolean;
 }) {
   const status = resolveSidebarThreadStatus(thread);
+  const dock = useMonarchDock();
+  const timelineSelected =
+    dock?.selection?.entityKind === "thread" && dock.selection.entityId === thread.id;
+  if (dock)
+    return (
+      <ProjectOverviewRow
+        dock={dock}
+        kind="thread"
+        entityId={thread.id}
+        title={thread.title || "Untitled thread"}
+        subtitle={`${STATUS_LABELS[status]}${thread.branch ? ` · ${thread.branch}` : ""}`}
+        needsInput={status === "input" || status === "approval" || status === "request"}
+      />
+    );
   return (
     <Link
       to="/$environmentId/$threadId"
       params={buildThreadRouteParams(scopeThreadRef(thread.environmentId, thread.id))}
-      className="flex min-w-0 flex-col gap-3.5 rounded-lg border border-border p-4 hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring data-[selected=true]:border-ring data-[selected=true]:bg-accent"
-      data-selected={selected}
+      className="flex min-w-0 flex-col gap-3.5 rounded-lg border border-border p-4 hover:bg-accent focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring data-[selected=true]:border-ring data-[selected=true]:bg-accent data-[timeline-hovered=true]:bg-accent/60"
+      data-selected={selected || timelineSelected}
       aria-current={selected ? "page" : undefined}
     >
       <span className="flex justify-between gap-3 text-muted-foreground">

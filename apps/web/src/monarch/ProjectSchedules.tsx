@@ -1,3 +1,4 @@
+import { ProjectOverviewRow } from "./ProjectOverviewRow";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -8,6 +9,8 @@ import { AuthOrchestrationOperateScope } from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { PauseIcon, PencilIcon, PlayIcon, PlusIcon } from "lucide-react";
 import { useState } from "react";
+import { createPortal } from "react-dom";
+import { useMonarchDock } from "./MonarchDockContext";
 
 import { scheduleLabel } from "../components/settings/scheduledTaskLabels";
 import { Button } from "../components/ui/button";
@@ -29,6 +32,7 @@ export function ProjectSchedules({
   suggestionEditor: MonarchReviewSchedule | "new" | null;
   onSuggestionEditorChange: (editor: MonarchReviewSchedule | "new" | null) => void;
 }) {
+  const dock = useMonarchDock();
   const navigate = useNavigate();
   const query = useEnvironmentQuery(
     serverEnvironment.scheduledTasksLive({
@@ -76,8 +80,75 @@ export function ProjectSchedules({
     }
   };
 
+  const selectedTask =
+    dock?.selection?.entityKind === "prompt-schedule"
+      ? tasks.find((task) => task.id === dock.selection?.entityId)
+      : null;
   return (
-    <section aria-labelledby="monarch-schedules-heading" className="border-t border-border pt-7">
+    <section aria-labelledby="monarch-schedules-heading" className="border-t border-border pt-4">
+      {dock?.activeKind === "timeline" && dock.actionHost && selectedTask
+        ? createPortal(
+            <>
+              {selectedTask.enabled && selectedTask.nextRunAt ? (
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  onClick={() =>
+                    dock.selectEntity?.({
+                      entityKind: "prompt-schedule",
+                      entityId: selectedTask.id,
+                      occurrence: "next",
+                    })
+                  }
+                >
+                  Next occurrence
+                </Button>
+              ) : null}
+              {selectedTask.lastRunAt ? (
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  onClick={() =>
+                    dock.selectEntity?.({
+                      entityKind: "prompt-schedule",
+                      entityId: selectedTask.id,
+                      occurrence: "last",
+                    })
+                  }
+                >
+                  Last run
+                </Button>
+              ) : null}
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!canOperate || archived}
+                onClick={() => edit(selectedTask)}
+              >
+                Edit task
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                disabled={busyId === selectedTask.id || !canOperate || archived}
+                onClick={() => void act(selectedTask, "toggle")}
+              >
+                {selectedTask.enabled ? "Pause" : "Resume"}
+              </Button>
+              {selectedTask.schedule.type !== "webhook" ? (
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  disabled={busyId === selectedTask.id || !canOperate || archived}
+                  onClick={() => void act(selectedTask, "run")}
+                >
+                  Run now
+                </Button>
+              ) : null}
+            </>,
+            dock.actionHost,
+          )
+        : null}
       <div className="flex flex-wrap items-start justify-between gap-3">
         <h2 id="monarch-schedules-heading" className="text-base font-medium tracking-tight">
           Scheduled tasks
@@ -122,73 +193,91 @@ export function ProjectSchedules({
         showEmpty={query.data !== undefined && tasks.length === 0}
       />
       {tasks.length > 0 ? (
-        <div className="mt-4 space-y-2">
-          {tasks.map((task) => (
-            <article key={task.id} className="rounded-xl border border-border bg-card px-4 py-3.5">
-              <div className="flex min-w-0 items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-sm font-medium break-words">{task.title}</h3>
-                    <span className="rounded-full border border-border px-2 py-0.5 text-3xs text-muted-foreground">
-                      {task.enabled ? "Active" : "Paused"}
-                    </span>
+        <div className="mt-2 space-y-0.5">
+          {tasks.map((task) =>
+            dock ? (
+              <ProjectOverviewRow
+                key={task.id}
+                dock={dock}
+                kind="prompt-schedule"
+                entityId={task.id}
+                title={task.title}
+                subtitle={`Runs a prompt · ${task.enabled ? scheduleLabel(task.schedule) : "Paused"}`}
+              />
+            ) : (
+              <article
+                key={task.id}
+                className="rounded-lg border border-border bg-card px-4 py-3 data-[timeline-selected=true]:border-ring data-[timeline-selected=true]:bg-accent data-[timeline-hovered=true]:bg-accent/60"
+              >
+                <div className="flex min-w-0 items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-medium break-words">{task.title}</h3>
+                      <span className="rounded-full border border-border px-2 py-0.5 text-3xs text-muted-foreground">
+                        {task.enabled ? "Active" : "Paused"}
+                      </span>
+                    </div>
+                    <p
+                      hidden={dock !== null}
+                      className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground"
+                    >
+                      {task.prompt}
+                    </p>
                   </div>
-                  <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
-                    {task.prompt}
-                  </p>
+                  <Button
+                    size="icon-xs"
+                    variant="ghost"
+                    hidden={dock !== null}
+                    aria-label={`Edit ${task.title}`}
+                    onClick={() => edit(task)}
+                  >
+                    <PencilIcon />
+                  </Button>
                 </div>
-                <Button
-                  size="icon-xs"
-                  variant="ghost"
-                  aria-label={`Edit ${task.title}`}
-                  onClick={() => edit(task)}
-                >
-                  <PencilIcon />
-                </Button>
-              </div>
-              <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/70 pt-3 text-2xs text-muted-foreground">
-                <span>Runs a prompt</span>
-                <span>{scheduleLabel(task.schedule)}</span>
-                <span>
-                  {task.blockedByPolicy ??
-                    (!task.enabled
-                      ? "Paused"
-                      : task.nextRunAt
-                        ? `Next ${new Date(task.nextRunAt).toLocaleString()}`
-                        : "No next run")}
-                </span>
-                {task.lastRunAt ? (
+                <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-border/70 pt-3 text-2xs text-muted-foreground">
+                  <span>Runs a prompt</span>
+                  <span>{scheduleLabel(task.schedule)}</span>
                   <span>
-                    Last {task.lastRunStatus} · {new Date(task.lastRunAt).toLocaleString()}
+                    {task.blockedByPolicy ??
+                      (!task.enabled
+                        ? "Paused"
+                        : task.nextRunAt
+                          ? `Next ${new Date(task.nextRunAt).toLocaleString()}`
+                          : "No next run")}
                   </span>
-                ) : null}
-                {task.lastRunError ? (
-                  <span className="text-destructive">{task.lastRunError}</span>
-                ) : null}
-              </div>
-              <div className="mt-3 flex flex-wrap gap-2">
-                <Button
-                  size="xs"
-                  variant="ghost-muted"
-                  disabled={busyId === task.id || !canOperate || archived}
-                  onClick={() => void act(task, "toggle")}
-                >
-                  {task.enabled ? <PauseIcon /> : <PlayIcon />}
-                  {task.enabled ? "Pause" : "Resume"}
-                </Button>
-                {task.schedule.type !== "webhook" ? (
+                  {task.lastRunAt ? (
+                    <span>
+                      Last {task.lastRunStatus} · {new Date(task.lastRunAt).toLocaleString()}
+                    </span>
+                  ) : null}
+                  {task.lastRunError ? (
+                    <span className="text-destructive">{task.lastRunError}</span>
+                  ) : null}
+                </div>
+                <div className={dock ? "hidden" : "mt-3 flex flex-wrap gap-2"}>
                   <Button
                     size="xs"
                     variant="ghost-muted"
                     disabled={busyId === task.id || !canOperate || archived}
-                    onClick={() => void act(task, "run")}
+                    onClick={() => void act(task, "toggle")}
                   >
-                    <PlayIcon /> Run now
+                    {task.enabled ? <PauseIcon /> : <PlayIcon />}
+                    {task.enabled ? "Pause" : "Resume"}
                   </Button>
-                ) : null}
-              </div>
-            </article>
-          ))}
+                  {task.schedule.type !== "webhook" ? (
+                    <Button
+                      size="xs"
+                      variant="ghost-muted"
+                      disabled={busyId === task.id || !canOperate || archived}
+                      onClick={() => void act(task, "run")}
+                    >
+                      <PlayIcon /> Run now
+                    </Button>
+                  ) : null}
+                </div>
+              </article>
+            ),
+          )}
         </div>
       ) : null}
     </section>

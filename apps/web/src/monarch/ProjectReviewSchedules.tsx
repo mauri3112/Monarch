@@ -1,3 +1,4 @@
+import { ProjectOverviewRow } from "./ProjectOverviewRow";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -12,6 +13,8 @@ import type {
 import { MONARCH_REVIEW_DRIVER_KINDS } from "@t3tools/contracts";
 import { HistoryIcon, PauseIcon, PencilIcon, PlayIcon, Trash2Icon } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
+import { useMonarchDock } from "./MonarchDockContext";
 
 import { ProviderModelPicker } from "../components/chat/ProviderModelPicker";
 import { scheduledTaskDefaultModel } from "../components/settings/scheduledTasksSettings.logic";
@@ -50,6 +53,7 @@ export function ProjectReviewSchedules({
   onEditorChange: (editor: MonarchReviewSchedule | "new" | null) => void;
   showEmpty: boolean;
 }) {
+  const dock = useMonarchDock();
   const query = useEnvironmentQuery(
     monarchEnvironment.schedules.live({
       environmentId: projectRef.environmentId,
@@ -134,8 +138,81 @@ export function ProjectReviewSchedules({
     query.refresh();
   }
 
+  const selectedSchedule =
+    dock?.selection?.entityKind === "review-schedule"
+      ? schedules.find((schedule) => schedule.id === dock.selection?.entityId)
+      : null;
   return (
     <>
+      {dock?.activeKind === "timeline" && dock.actionHost && selectedSchedule
+        ? createPortal(
+            <>
+              {selectedSchedule.enabled && selectedSchedule.nextRunAt ? (
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  onClick={() =>
+                    dock.selectEntity?.({
+                      entityKind: "review-schedule",
+                      entityId: selectedSchedule.id,
+                      occurrence: "next",
+                    })
+                  }
+                >
+                  Next occurrence
+                </Button>
+              ) : null}
+              {selectedSchedule.lastRunAt ? (
+                <Button
+                  size="xs"
+                  variant="ghost-muted"
+                  onClick={() =>
+                    dock.selectEntity?.({
+                      entityKind: "review-schedule",
+                      entityId: selectedSchedule.id,
+                      occurrence: "last",
+                    })
+                  }
+                >
+                  Last run
+                </Button>
+              ) : null}
+              <Button
+                size="xs"
+                variant="outline"
+                disabled={!canEdit}
+                onClick={() => onEditorChange(selectedSchedule)}
+              >
+                Edit task
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                disabled={!canEdit || busyId === selectedSchedule.id}
+                onClick={() => void act(selectedSchedule, "toggle")}
+              >
+                {selectedSchedule.enabled ? "Pause" : "Resume"}
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost-muted"
+                disabled={!canEdit || busyId === selectedSchedule.id}
+                onClick={() => void act(selectedSchedule, "run")}
+              >
+                Run now
+              </Button>
+              <Button
+                size="xs"
+                variant="ghost-destructive"
+                disabled={!canEdit || busyId === selectedSchedule.id}
+                onClick={() => void act(selectedSchedule, "remove")}
+              >
+                Delete task
+              </Button>
+            </>,
+            dock.actionHost,
+          )
+        : null}
       {query.error ? (
         <p role="alert" className="mt-3 text-xs text-destructive">
           Could not load suggestion schedules: {query.error}{" "}
@@ -154,16 +231,23 @@ export function ProjectReviewSchedules({
           Loading suggestion schedules…
         </p>
       ) : null}
-      {editor ? (
-        <ReviewEditor
-          key={editor === "new" ? "new" : editor.id}
-          projectRef={projectRef}
-          schedule={editor === "new" ? null : editor}
-          busy={busyId === "editor"}
-          onSave={(value) => void save(value)}
-          onCancel={() => onEditorChange(null)}
-        />
-      ) : null}
+      {editor
+        ? (() => {
+            const form = (
+              <ReviewEditor
+                key={editor === "new" ? "new" : editor.id}
+                projectRef={projectRef}
+                schedule={editor === "new" ? null : editor}
+                busy={busyId === "editor"}
+                onSave={(value) => void save(value)}
+                onCancel={() => onEditorChange(null)}
+              />
+            );
+            return dock?.activeKind === "timeline" && dock.actionHost && editor !== "new"
+              ? createPortal(<div className="w-full">{form}</div>, dock.actionHost)
+              : form;
+          })()
+        : null}
       {showEmpty && query.data && schedules.length === 0 && !editor ? (
         <div className="mt-4 rounded-xl border border-dashed border-border p-4">
           <p className="text-sm font-medium">No scheduled tasks yet</p>
@@ -173,7 +257,7 @@ export function ProjectReviewSchedules({
         </div>
       ) : null}
       {schedules.length ? (
-        <div className="mt-4 space-y-2">
+        <div className="mt-2 space-y-0.5">
           {schedules.map((schedule) => (
             <ReviewCard
               key={schedule.id}
@@ -206,6 +290,7 @@ function ReviewCard({
   onEdit: () => void;
   onAct: (action: "toggle" | "run" | "remove") => void;
 }) {
+  const dock = useMonarchDock();
   const [historyOpen, setHistoryOpen] = useState(false);
   const history = useEnvironmentQuery(
     historyOpen
@@ -215,8 +300,18 @@ function ReviewCard({
         })
       : null,
   );
+  if (dock)
+    return (
+      <ProjectOverviewRow
+        dock={dock}
+        kind="review-schedule"
+        entityId={schedule.id}
+        title={schedule.title}
+        subtitle={`Suggests next threads · ${schedule.enabled ? recurrenceLabel(schedule.recurrence, schedule.timezone) : "Paused"}`}
+      />
+    );
   return (
-    <article className="rounded-xl border border-border bg-card p-4">
+    <article className="rounded-lg border border-border bg-card px-4 py-3 data-[timeline-selected=true]:border-ring data-[timeline-selected=true]:bg-accent data-[timeline-hovered=true]:bg-accent/60">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <h3 className="text-sm font-medium break-words">{schedule.title}</h3>
@@ -228,7 +323,7 @@ function ReviewCard({
           {schedule.enabled ? "Active" : "Paused"}
         </span>
       </div>
-      {schedule.instructions ? (
+      {schedule.instructions && !dock ? (
         <p className="mt-2 line-clamp-2 text-xs leading-relaxed text-muted-foreground">
           {schedule.instructions}
         </p>
@@ -251,7 +346,7 @@ function ReviewCard({
           <span className="text-destructive">{schedule.lastRunError}</span>
         ) : null}
       </div>
-      <div className="mt-3 flex flex-wrap gap-1.5">
+      <div className={dock ? "hidden" : "mt-3 flex flex-wrap gap-1.5"}>
         <Button size="xs" variant="ghost-muted" disabled={!canEdit || busy} onClick={onEdit}>
           <PencilIcon /> Edit
         </Button>

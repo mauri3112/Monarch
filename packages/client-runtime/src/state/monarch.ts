@@ -11,6 +11,16 @@ export function createMonarchEnvironmentCommands<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
 ) {
   return {
+    timeline: {
+      history: createEnvironmentRpcQueryAtomFamily(runtime, {
+        label: "monarch:timeline:history",
+        tag: WS_METHODS.monarchTimelineHistory,
+      }),
+      live: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+        label: "monarch:timeline:live",
+        tag: WS_METHODS.monarchTimelineSubscribe,
+      }),
+    },
     continuity: {
       refresh: createEnvironmentRpcCommand(runtime, {
         label: "monarch:continuity:refresh",

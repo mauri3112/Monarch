@@ -8,6 +8,7 @@ import {
   TextGenerationError,
   type MonarchScheduleIdentity,
 } from "@t3tools/contracts";
+import { DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION } from "@t3tools/shared/monarchContext";
 import type { ProviderInstance } from "@t3tools/provider-core/server/driver";
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import * as Deferred from "effect/Deferred";
@@ -82,7 +83,17 @@ const fixture = Effect.fn("MonarchSchedulerTest.fixture")(function* (
             enabled: true,
             installed: true,
             auth: { status: "authenticated" },
-            models: [{ slug: "test-model" }],
+            models: [
+              { slug: "test-model" },
+              {
+                slug: "gpt-6-luna",
+                capabilities: {
+                  optionDescriptors: [
+                    { id: "reasoningEffort", type: "select", options: [{ id: "xhigh" }] },
+                  ],
+                },
+              },
+            ],
           }),
         },
       } as unknown as ProviderInstance),
@@ -165,8 +176,32 @@ it.effect(
       const f = yield* fixture(
         (input) =>
           Effect.gen(function* () {
-            yield* Ref.update(suggestions, (n) => n + 1);
+            const count = yield* Ref.updateAndGet(suggestions, (n) => n + 1);
+            if (count === 2) {
+              assert.notInclude(
+                input.context,
+                "An implementation was reported on the feature branch.",
+              );
+              return { suggestions: [] };
+            }
+            if (count === 3) {
+              const supplied = JSON.parse(input.context) as {
+                completedTurnJournals: Array<{ runId: string }>;
+              };
+              assert.deepEqual(
+                supplied.completedTurnJournals.map((j) => j.runId),
+                [source!.runId],
+              );
+              assert.notInclude(
+                input.context,
+                "An implementation was reported on the feature branch.",
+              );
+              return { suggestions: [] };
+            }
+            assert.deepEqual(input.modelSelection, modelSelection);
             assert.include(input.context, "Captured branch outcome");
+            assert.notInclude(input.context, "Reported implementation outcome");
+            assert.notInclude(input.context, "before-opt-in");
             return {
               suggestions: [
                 {
@@ -179,15 +214,21 @@ it.effect(
               ],
             };
           }),
-        () =>
+        (input) =>
           Effect.gen(function* () {
-            yield* Ref.update(extracts, (n) => n + 1);
+            assert.deepEqual(input.modelSelection, DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION);
+            assert.include(input.context, "Reported implementation outcome");
+            const count = yield* Ref.updateAndGet(extracts, (n) => n + 1);
+            assert.notInclude(input.context, "Other branch private detail");
             return {
               entries: [
                 {
                   kind: "outcome" as const,
-                  title: "Captured branch outcome",
-                  body: "An implementation was reported on the feature branch.",
+                  title: count === 1 ? "Captured branch outcome" : "Follow-up outcome",
+                  body:
+                    count === 1
+                      ? "An implementation was reported on the feature branch."
+                      : "The follow-up turn recorded a different outcome.",
                   scope: "branch" as const,
                   branch: "feature",
                   sourceRefs: [source!],
@@ -209,6 +250,18 @@ it.effect(
         const service = yield* MonarchScheduler.MonarchScheduler;
         yield* f.tick;
         assert.equal(yield* Ref.get(extracts), 0);
+        yield* f.context.upsertEntry({
+          projectId,
+          kind: "decision",
+          scope: "branch",
+          branch: "elsewhere",
+          title: "Private branch note",
+          body: "Other branch private detail",
+          sourceRefs: [],
+          contradictsEntryIds: [],
+          pinned: false,
+          evidence: "reported",
+        });
         source = yield* completedEvidence("after-opt-in");
         const deleted = yield* completedEvidence("deleted-cohort");
         const active = yield* completedEvidence("active-cohort");
@@ -225,7 +278,28 @@ it.effect(
         const activity = yield* service.activity({ projectId });
         assert.equal(activity.runs[0]!.trigger, "work-completed");
         assert.equal(activity.runs[0]!.contextEntryIds?.length, 1);
-        assert.equal((yield* f.context.get({ projectId })).entries[0]!.evidence, "reported");
+        const [journal] = yield* f.sql<{
+          branch: string;
+          worktree_path: string;
+          revision: number;
+          entries_json: string;
+        }>`SELECT branch,worktree_path,revision,entries_json FROM monarch_run_journals WHERE project_id=${projectId} AND run_id=${source.runId}`;
+        assert.equal(journal?.branch, "feature");
+        assert.equal(journal?.worktree_path, "/tmp/monarch-review-fixture");
+        assert.equal(journal?.revision, 1);
+        assert.notInclude(journal!.entries_json, "Reported implementation outcome");
+        const [review] = yield* f.sql<{
+          source_refs_json: string;
+        }>`SELECT source_refs_json FROM monarch_review_stages WHERE review_run_id=${activity.runs[0]!.id} AND stage='suggestions'`;
+        assert.deepEqual(JSON.parse(review!.source_refs_json), [
+          { runId: source.runId, revision: 1 },
+        ]);
+        assert.equal(
+          (yield* f.context.get({ projectId })).entries.find(
+            (entry) => entry.title === "Captured branch outcome",
+          )!.evidence,
+          "reported",
+        );
         yield* f.tick;
         assert.equal(yield* Ref.get(extracts), 1);
         assert.equal((yield* service.activity({ projectId })).runs.length, 1);
@@ -243,11 +317,34 @@ it.effect(
         yield* waitForActivity(service, 2);
         assert.equal(yield* Ref.get(extracts), 1);
         assert.equal(yield* Ref.get(suggestions), 2);
+        const original = (yield* f.context.get({ projectId })).entries.find(
+          (e) => e.title === "Captured branch outcome",
+        )!;
+        yield* f.context.removeEntry({
+          projectId,
+          entryId: original.id,
+          expectedRevision: original.revision,
+        });
+        source = { ...source, runId: RunId.make("second-source-turn") };
+        yield* f.sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,completed_at,payload_json)
+          SELECT ${source.runId},thread_id,2,provider,status,requested_at,completed_at,json_set(payload_json,'$.id',${source.runId})
+          FROM orchestration_v2_projection_runs WHERE run_id='run-after-opt-in'`;
+        yield* f.sql`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,run_id,role,streaming,created_at,updated_at,payload_json)
+          VALUES('next-message',${source.threadId},${source.runId},'assistant',0,${at},${at},'{"text":"Reported implementation outcome for the follow-up turn."}')`;
+        yield* f.sql`INSERT INTO orchestration_events(event_id,aggregate_kind,stream_id,stream_version,event_type,occurred_at,actor_kind,payload_json,metadata_json,application_event_version)
+          SELECT 'next-completed-turn','thread',thread_id,2,'run.updated',${at},'system',payload_json,'{}',2 FROM orchestration_v2_projection_runs WHERE run_id=${source.runId}`;
+        yield* f.tick;
+        yield* waitForActivity(service, 3);
+        assert.equal(
+          (yield* f.sql`SELECT run_id FROM monarch_run_journals WHERE thread_id=${source.threadId}`)
+            .length,
+          2,
+        );
       }).pipe(Effect.provide(f.layer));
       yield* Effect.gen(function* () {
         yield* f.tick;
-        assert.equal(yield* Ref.get(extracts), 1);
-        assert.equal(yield* Ref.get(suggestions), 2);
+        assert.equal(yield* Ref.get(extracts), 2);
+        assert.equal(yield* Ref.get(suggestions), 3);
       }).pipe(Effect.provide(Layer.fresh(f.layer)));
     }).pipe(Effect.provide(base)),
 );
@@ -261,16 +358,16 @@ it.effect(
         () => Effect.die("Context-only builds must not generate suggestions"),
         () => Ref.update(calls, (n) => n + 1).pipe(Effect.as({ entries: [] })),
       );
-      yield* completedEvidence("manual-build");
+      const source = yield* completedEvidence("manual-build");
       const initial = yield* f.context.get({ projectId });
       let state = yield* f.context.updateSettings({
         projectId,
         expectedRevision: initial.revision,
-        settings: { ...initial.settings, modelSelection, maxUpdatesPerDay: 1, paused: true },
+        settings: { ...initial.settings, maxUpdatesPerDay: 1, paused: true },
       });
       yield* Effect.gen(function* () {
         const service = yield* MonarchScheduler.MonarchScheduler;
-        yield* service.refresh({ projectId, mode: "build-context" });
+        yield* service.refresh({ projectId, mode: "build-context", threadIds: [source!.threadId] });
         yield* f.tick;
         assert.equal(yield* Ref.get(calls), 0);
         assert.equal((yield* service.activity({ projectId })).blockedReason, "paused");
@@ -284,6 +381,10 @@ it.effect(
         assert.equal(yield* Ref.get(calls), 1);
         assert.equal((yield* service.activity({ projectId })).runs[0]!.trigger, "build-context");
         assert.deepEqual((yield* service.list({ projectId })).schedules, []);
+        const [receipt] = yield* f.sql<{
+          entries_json: string;
+        }>`SELECT entries_json FROM monarch_run_journals WHERE project_id=${projectId} AND run_id=${source.runId}`;
+        assert.equal(receipt?.entries_json, "[]");
         yield* service.refresh({ projectId, mode: "retry" });
         yield* f.tick;
         assert.equal((yield* service.activity({ projectId })).blockedReason, "daily-limit");
@@ -293,6 +394,50 @@ it.effect(
         yield* waitForActivity(service, 2);
         assert.equal(yield* Ref.get(calls), 1);
         assert.equal((yield* service.activity({ projectId })).pending, false);
+        const unsupported = {
+          ...modelSelection,
+          options: [{ id: "reasoningEffort", value: "unadvertised" }],
+        };
+        state = yield* f.context.updateSettings({
+          projectId,
+          expectedRevision: state.settingsRevision,
+          settings: { ...state.settings, maxUpdatesPerDay: 10, journalModelSelection: unsupported },
+        });
+        yield* service.refresh({
+          projectId,
+          mode: "build-context",
+          threadIds: [source.threadId],
+          reanalyze: true,
+        });
+        yield* f.tick;
+        yield* waitForActivity(service, 3);
+        const [blocked] = yield* f.sql<{
+          status: string;
+          error: string;
+        }>`SELECT status,error FROM monarch_review_stages WHERE project_id=${projectId} AND model_json=${yield* encodeJson(unsupported)}`;
+        assert.equal(blocked?.status, "failed");
+        assert.include(blocked!.error, "available journal model");
+        assert.equal(yield* Ref.get(calls), 1);
+        yield* f.context.updateSettings({
+          projectId,
+          expectedRevision: state.settingsRevision,
+          settings: { ...state.settings, journalModelSelection: modelSelection },
+        });
+        yield* service.refresh({ projectId, mode: "retry" });
+        yield* f.tick;
+        yield* waitForActivity(service, 4);
+        const revisions = yield* f.sql<{
+          revision: number;
+          model: string;
+        }>`SELECT revision,json_extract(model_json,'$.model') AS model FROM monarch_run_journal_revisions WHERE project_id=${projectId} AND run_id=${source.runId} ORDER BY revision`;
+        assert.deepEqual(
+          revisions.map((row) => [row.revision, row.model]),
+          [
+            [1, "gpt-6-luna"],
+            [2, "test-model"],
+          ],
+        );
+        assert.equal(yield* Ref.get(calls), 2);
       }).pipe(Effect.provide(f.layer));
     }).pipe(Effect.provide(base)),
 );
@@ -355,8 +500,9 @@ it.effect(
       const attempts = yield* Ref.make(0);
       let source: { threadId: ThreadId; runId: RunId } | undefined;
       const f = yield* fixture(
-        () =>
+        (input) =>
           Effect.gen(function* () {
+            assert.include(input.context, "Reported storage change");
             const attempt = yield* Ref.updateAndGet(attempts, (n) => n + 1);
             if (attempt === 1)
               return yield* new TextGenerationError({
@@ -365,22 +511,24 @@ it.effect(
               });
             return { suggestions: [] };
           }),
-        () =>
-          Ref.update(extracts, (n) => n + 1).pipe(
-            Effect.as({
-              entries: [
-                {
-                  kind: "outcome" as const,
-                  title: "Reported storage change",
-                  body: "Storage changed on the branch; no independent checks recorded.",
-                  scope: "branch" as const,
-                  branch: "feature",
-                  sourceRefs: [source!],
-                  contradictsEntryIds: [],
-                },
-              ],
-            }),
-          ),
+        (input) =>
+          input.context.includes("run-separate-branch")
+            ? Ref.update(extracts, (n) => n + 1).pipe(Effect.as({ entries: [] }))
+            : Ref.update(extracts, (n) => n + 1).pipe(
+                Effect.as({
+                  entries: [
+                    {
+                      kind: "outcome" as const,
+                      title: "Reported storage change",
+                      body: "Storage changed on the branch; no independent checks recorded.",
+                      scope: "branch" as const,
+                      branch: "feature",
+                      sourceRefs: [source!],
+                      contradictsEntryIds: [],
+                    },
+                  ],
+                }),
+              ),
       );
       source = yield* completedEvidence("partial-context");
       const initial = yield* f.context.get({ projectId });
@@ -391,6 +539,7 @@ it.effect(
       });
       yield* Effect.gen(function* () {
         const service = yield* MonarchScheduler.MonarchScheduler;
+        yield* service.refresh({ projectId, mode: "build-context", threadIds: [source!.threadId] });
         yield* service.refresh({ projectId, mode: "refresh" });
         yield* f.tick;
         yield* waitForActivity(service, 1);
@@ -401,13 +550,25 @@ it.effect(
         assert.equal((yield* f.context.get({ projectId })).entries.length, 1);
         yield* f.tick;
         assert.equal(yield* Ref.get(attempts), 1);
+        const other = yield* completedEvidence("separate-branch");
+        yield* f.sql`UPDATE orchestration_v2_projection_runs SET payload_json=json_set(payload_json,'$.workspacePreparation.branch','unrelated') WHERE run_id=${other.runId}`;
+        yield* service.refresh({ projectId, mode: "build-context", threadIds: [other.threadId] });
         yield* service.refresh({ projectId, mode: "retry" });
         yield* f.tick;
         yield* waitForActivity(service, 2);
         assert.equal(yield* Ref.get(extracts), 1);
         assert.equal(yield* Ref.get(attempts), 2);
         const completed = yield* service.activity({ projectId });
-        assert.equal(completed.pending, false);
+        assert.equal(completed.pending, true);
+        const retry = completed.runs.find((run) => run.trigger === "retry")!;
+        assert.equal(retry.retryOfRunId, failed.runs[0]!.id);
+        assert.equal(retry.reviewScopeRunId, source!.runId);
+        assert.deepEqual(retry.sourceRunIds, []);
+        yield* f.tick;
+        yield* waitForActivity(service, 3);
+        assert.equal(yield* Ref.get(extracts), 2);
+        assert.equal(yield* Ref.get(attempts), 2);
+        assert.equal((yield* service.activity({ projectId })).pending, false);
         assert.equal(completed.updatesToday, 2);
       }).pipe(Effect.provide(f.layer));
     }).pipe(Effect.provide(base)),
@@ -450,7 +611,7 @@ it.effect(
       });
       yield* Effect.gen(function* () {
         const service = yield* MonarchScheduler.MonarchScheduler;
-        yield* service.refresh({ projectId, mode: "build-context" });
+        yield* service.refresh({ projectId, mode: "build-context", threadIds: [source!.threadId] });
         yield* f.tick;
         yield* Deferred.await(entered);
         yield* f.monarch.updateTarget({
@@ -656,6 +817,8 @@ it.effect(
       yield* f.sql`INSERT INTO orchestration_v2_projection_messages
         (message_id, thread_id, run_id, role, streaming, created_at, updated_at, payload_json)
         VALUES ('hidden', 'completed-source', 'completed-run', 'system', 0, ${at}, ${at}, '{"text":"SYSTEM_CONTEXT_MUST_STAY_PRIVATE"}')`;
+      yield* f.sql`INSERT INTO monarch_run_journals(project_id,run_id,thread_id,completed_at,branch,entries_json,review_run_id,model_json,started_at,recorded_at)
+      VALUES(${projectId},'completed-run','completed-source',${at},NULL,${yield* encodeJson([{ kind: "outcome", title: "Known inputs", body: "A saved journal describes the missing manifest.", scope: "project", branch: null, sourceRefs: [{ threadId: "completed-source", runId: "completed-run" }], contradictsEntryIds: [] }])},'old-review','{}',${at},${at})`;
       yield* Effect.gen(function* () {
         const service = yield* MonarchScheduler.MonarchScheduler;
         const schedule = yield* create(service);
@@ -666,7 +829,8 @@ it.effect(
         yield* f.tick;
         const context = yield* Deferred.await(started);
         assert.include(context, "Reproducible analysis");
-        assert.include(context, "input manifest remains undocumented");
+        assert.include(context, "A saved journal describes the missing manifest");
+        assert.notInclude(context, "input manifest remains undocumented");
         assert.notInclude(context, "SYSTEM_CONTEXT_MUST_STAY_PRIVATE");
         yield* Effect.all([f.tick, f.tick], { concurrency: "unbounded" });
         assert.equal((yield* service.runNow(schedule).pipe(Effect.flip)).reason, "busy");

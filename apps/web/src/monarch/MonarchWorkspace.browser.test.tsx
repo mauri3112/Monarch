@@ -37,6 +37,10 @@ vi.mock("./ProjectBoard", async () => {
   };
 });
 
+vi.mock("./ProjectActivityDock", () => ({
+  ProjectActivityDock: () => <div>Project Timeline</div>,
+}));
+
 vi.mock("./ProjectContextIncludedNotice", () => ({
   ProjectContextIncludedNotice: ({ panelOnly }: { panelOnly?: boolean }) =>
     panelOnly ? <div>Included context panel</div> : null,

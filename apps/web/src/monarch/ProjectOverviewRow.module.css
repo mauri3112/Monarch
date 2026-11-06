@@ -1,0 +1,93 @@
+.row {
+  --row-color: light-dark(#2867bc, #8ab4f0);
+  display: grid;
+  grid-template-columns: 13px minmax(0, 1fr) 12px;
+  align-items: start;
+  gap: 8px;
+  width: 100%;
+  border: 0;
+  border-radius: 2px;
+  padding: 6px 4px;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+.row:hover,
+.row[data-timeline-hovered="true"] {
+  background: var(--accent);
+}
+.row[data-selected="true"] {
+  background: color-mix(in srgb, var(--primary) 9%, transparent);
+  box-shadow: inset 2px 0 var(--primary);
+}
+.row:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.row[data-family="target"] {
+  --row-color: light-dark(#aa6406, #efb44b);
+}
+.row[data-family="schedule"] {
+  --row-color: light-dark(#177b54, #68c59b);
+}
+.row[data-family="suggestion"] {
+  --row-color: light-dark(#b53270, #ef8dbb);
+}
+.marker {
+  width: 9px;
+  height: 9px;
+  margin: 5px 2px 0;
+  border: 1.5px solid var(--row-color);
+  border-radius: 50%;
+  color: var(--row-color);
+  background: var(--row-color);
+}
+.row[data-family="target"] .marker {
+  border-radius: 1px;
+  transform: rotate(45deg);
+}
+.row[data-family="schedule"] .marker {
+  border-radius: 2px;
+}
+.row[data-family="suggestion"] .marker {
+  width: 12px;
+  height: 12px;
+  margin: 3px 0 0;
+  border: 0;
+  border-radius: 0;
+  clip-path: polygon(50% 0, 64% 35%, 100% 50%, 64% 65%, 50% 100%, 36% 65%, 0 50%, 36% 35%);
+}
+.row[data-needs-input="true"] .marker {
+  width: 12px;
+  height: 12px;
+  margin: 3px 0 0;
+  background: transparent;
+  font: 700 9px/10px sans-serif;
+  text-align: center;
+}
+.copy {
+  min-width: 0;
+}
+.title {
+  display: block;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 19px;
+}
+.subtitle {
+  display: block;
+  margin-top: 1px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+  line-height: 17px;
+}
+.hint {
+  align-self: center;
+  width: 12px;
+  height: 12px;
+  color: var(--muted-foreground);
+}
+.row[data-selected="true"] .hint {
+  color: var(--primary);
+}

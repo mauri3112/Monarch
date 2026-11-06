@@ -67,6 +67,11 @@ it.layer(base)("Project context", (it) => {
         const initial = yield* f.service.get({ projectId: f.projectId });
         assert.isFalse(initial.settings.enabled);
         assert.isNull(initial.settings.modelSelection);
+        assert.deepEqual(initial.settings.journalModelSelection, {
+          instanceId: ProviderInstanceId.make("codex"),
+          model: "gpt-6-luna",
+          options: [{ id: "reasoningEffort", value: "xhigh" }],
+        });
         assert.strictEqual(initial.revision, 0);
         const [eventWatermark] = yield* f.sql<{
           sequence: number;
@@ -89,6 +94,10 @@ it.layer(base)("Project context", (it) => {
               instanceId: ProviderInstanceId.make("codex"),
               model: "synthetic-model",
             },
+            journalModelSelection: {
+              instanceId: ProviderInstanceId.make("codex"),
+              model: "explicit-journal-model",
+            },
             brief: "Keep the project local and understandable.",
           },
         });
@@ -106,11 +115,13 @@ it.layer(base)("Project context", (it) => {
           evidence: "confirmed",
           pinned: true,
         });
+        const { journalModelSelection: configuredJournal, ...legacySettings } = state.settings;
         const paused = yield* f.service.updateSettings({
           projectId: f.projectId,
           expectedRevision: state.settingsRevision,
-          settings: { ...state.settings, paused: true },
+          settings: { ...legacySettings, paused: true },
         });
+        assert.deepEqual(paused.settings.journalModelSelection, configuredJournal);
         assert.strictEqual(paused.enabledAt, state.enabledAt);
         const reloaded = yield* Effect.gen(function* () {
           return yield* (yield* MonarchContextService.MonarchContextService).get({

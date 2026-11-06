@@ -1,4 +1,5 @@
 import {
+  MonarchGeneratedContextEntry,
   isProviderAvailable,
   resolveProjectProviderInstanceEnabled,
   MonarchReviewSchedule,
@@ -19,6 +20,7 @@ import {
   type MonarchSchedulesSetEnabledInput,
   type ProjectId,
 } from "@t3tools/contracts";
+import { DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION } from "@t3tools/shared/monarchContext";
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -135,6 +137,8 @@ const decodeSchedule = Schema.decodeEffect(Schema.fromJsonString(MonarchReviewSc
 const encodeSchedule = Schema.encodeEffect(Schema.fromJsonString(MonarchReviewSchedule));
 const decodeRun = Schema.decodeEffect(Schema.fromJsonString(MonarchScheduleRun));
 const encodeRun = Schema.encodeEffect(Schema.fromJsonString(MonarchScheduleRun));
+const journalEntries = Schema.Array(MonarchGeneratedContextEntry).check(Schema.isMaxLength(5));
+const decodeJournalEntries = Schema.decodeEffect(Schema.fromJsonString(journalEntries));
 const encodeContext = Schema.encodeEffect(Schema.fromJsonString(Schema.Unknown));
 const decodeUpsert = Schema.decodeEffect(MonarchSchedulesUpsertInput);
 const decodeRefresh = Schema.decodeEffect(MonarchProjectRefreshInput);
@@ -174,6 +178,7 @@ const make = Effect.gen(function* () {
   const selectedProvider = Effect.fn("MonarchScheduler.selectedProvider")(function* (
     selection: ModelSelection,
     projectId: ProjectId,
+    journal = false,
   ) {
     const configuration = yield* settings.getSettings.pipe(
       Effect.mapError(
@@ -183,19 +188,35 @@ const make = Effect.gen(function* () {
     if (!resolveProjectProviderInstanceEnabled(configuration, projectId, selection.instanceId))
       return yield* new MonarchScheduleError({ reason: "provider_unavailable" });
     const instance = yield* registry.getInstance(selection.instanceId);
-    if (!instance?.textGeneration.generateProjectSuggestions) {
+    if (
+      !instance ||
+      !(journal
+        ? instance.textGeneration.generateProjectContext
+        : instance.textGeneration.generateProjectSuggestions)
+    ) {
       return yield* new MonarchScheduleError({ reason: "provider_unavailable" });
     }
     const snapshot = yield* instance.snapshot.getSnapshot;
+    const model = snapshot.models.find(
+      (candidate) =>
+        candidate.slug === selection.model || candidate.aliases?.includes(selection.model),
+    );
+    const unsupportedOption =
+      journal &&
+      selection.options?.some((option) => {
+        const descriptor = model?.capabilities?.optionDescriptors?.find((d) => d.id === option.id);
+        return descriptor?.type === "select"
+          ? !descriptor.options.some((choice) => choice.id === option.value)
+          : descriptor?.type !== "boolean" || typeof option.value !== "boolean";
+      });
     if (
       !REVIEW_DRIVERS.has(snapshot.driver) ||
       !snapshot.enabled ||
       !snapshot.installed ||
       snapshot.auth.status === "unauthenticated" ||
       !isProviderAvailable(snapshot) ||
-      !snapshot.models.some(
-        (model) => model.slug === selection.model || model.aliases?.includes(selection.model),
-      )
+      !model ||
+      unsupportedOption
     ) {
       return yield* new MonarchScheduleError({ reason: "provider_unavailable" });
     }
@@ -382,19 +403,12 @@ const make = Effect.gen(function* () {
                 error.reason === "unknown_scope" ? Effect.succeed(null) : Effect.fail(error),
             }),
           );
-        const messages = yield* sql<{
-          role: string;
-          text: string;
-        }>`SELECT role, substr(json_extract(payload_json,'$.text'),1,3000) AS text
-        FROM orchestration_v2_projection_messages WHERE thread_id=${row.threadId} AND run_id=${row.runId}
-          AND role IN ('user','assistant') AND streaming=0 ORDER BY created_at DESC,message_id DESC LIMIT 2`;
         return {
           ...row,
           branch: sourceScope?.branch ?? null,
           worktreePath: sourceScope?.worktreePath ?? null,
           scopeKnown: sourceScope !== null,
           evidence: "reported" as const,
-          messages: messages.toReversed(),
         };
       }),
     );
@@ -516,12 +530,9 @@ const make = Effect.gen(function* () {
   const enqueueSources = Effect.fn("MonarchScheduler.enqueueSources")(function* (
     projectId: ProjectId,
     sourceRows: ReadonlyArray<{ threadId: ThreadId; runId: RunId; sequence?: number }>,
-    reviveIgnored = false,
   ) {
     let count = 0;
     for (const source of sourceRows) {
-      if (reviveIgnored)
-        yield* sql`UPDATE monarch_continuity_sources SET captured=0 WHERE project_id=${projectId} AND run_id=${source.runId} AND captured=2`;
       const inserted =
         yield* sql`INSERT INTO monarch_continuity_sources(project_id,run_id,thread_id,event_sequence)
         VALUES(${projectId},${source.runId},${source.threadId},${source.sequence ?? 0}) ON CONFLICT(project_id,run_id) DO NOTHING RETURNING run_id`;
@@ -592,16 +603,40 @@ const make = Effect.gen(function* () {
     }
   }, Effect.mapError(storageError));
 
+  const startStage = Effect.fn("MonarchScheduler.startStage")(function* (
+    run: MonarchScheduleRun,
+    stage: "journal" | "suggestions",
+    selection: ModelSelection,
+    sources: ReadonlyArray<RunId>,
+  ) {
+    yield* sql`INSERT INTO monarch_review_stages(project_id,review_run_id,stage,source_run_ids_json,model_json,started_at,status)
+      VALUES(${run.projectId},${run.id},${stage},${yield* encodeContext(sources)},${yield* encodeContext(selection)},${yield* nowIso},'running')`;
+    yield* notify;
+  }, Effect.mapError(storageError));
+
+  const requireClaim = Effect.fn("MonarchScheduler.requireClaim")(function* (
+    run: MonarchScheduleRun,
+  ) {
+    const [row] = yield* sql`SELECT s.id FROM monarch_review_schedules s
+      JOIN projection_projects p ON p.project_id=s.project_id
+      WHERE s.id=${run.scheduleId} AND s.project_id=${run.projectId} AND s.active_run_id=${run.id}
+        AND p.deleted_at IS NULL AND p.archived_at IS NULL`;
+    if (!row) return yield* new MonarchScheduleError({ reason: "conflict" });
+  }, Effect.mapError(storageError));
+
   const captureContext = Effect.fn("MonarchScheduler.captureContext")(
     function* (schedule: MonarchReviewSchedule, run: MonarchScheduleRun) {
-      const state = yield* context.get({ projectId: schedule.projectId });
+      const projectId = schedule.projectId;
+      const state = yield* context.get({ projectId });
+      if (
+        state.settings.paused ||
+        (run.contextRevision !== undefined && run.contextRevision !== state.revision)
+      )
+        return yield* new MonarchScheduleError({ reason: "conflict" });
       if (!run.updateContext || !run.sourceRunIds?.length)
         return { state, entryIds: [] as string[], summary: "No new outcomes to capture." };
-      const provider = yield* selectedProvider(schedule.modelSelection, schedule.projectId);
-      if (!provider.generateProjectContext)
-        return yield* new MonarchScheduleError({ reason: "provider_unavailable" });
       const candidates = yield* completedSources(
-        schedule.projectId,
+        projectId,
         state.settings.excludedThreadIds,
         run.sourceRunIds,
       );
@@ -610,102 +645,135 @@ const make = Effect.gen(function* () {
       const summary = skipped
         ? `Skipped ${skipped} unavailable outcomes or outcomes whose original workspace scope could not be established.`
         : "Project outcomes reviewed.";
-      if (!evidence.length) {
-        yield* sql`UPDATE monarch_continuity_sources SET captured=1 WHERE project_id=${schedule.projectId} AND run_id IN ${sql.in(run.sourceRunIds)}`;
-        return { state, entryIds: [] as string[], summary };
-      }
-      const planning = yield* monarch.list({ projectId: schedule.projectId });
-      const targetsAtCapture = yield* targetFingerprint(schedule.projectId);
-      const result = yield* provider.generateProjectContext({
-        cwd: (yield* project(schedule.projectId)).workspace_root,
-        modelSelection: schedule.modelSelection,
-        context: yield* encodeReviewContext({
-          brief: state.settings.brief,
-          instructions: state.settings.instructions,
-          contextRevision: state.revision,
-          currentEntries: state.entries
-            .toSorted(
-              (a, b) =>
-                Number(b.pinned) - Number(a.pinned) ||
-                Number(b.evidence === "confirmed") - Number(a.evidence === "confirmed") ||
-                b.updatedAt.localeCompare(a.updatedAt),
-            )
-            .slice(0, 30)
-            .map(
-              ({ id, kind, title, body, scope, branch, evidence, pinned, origin, sourceRefs }) => ({
-                id,
-                kind,
-                title,
-                body,
-                scope,
-                branch,
-                evidence,
-                pinned,
-                origin,
-                sourceRefs: sourceRefs.slice(0, 8),
-              }),
-            ),
-          activeTargets: planning.targets
-            .filter((t) => t.status === "active")
-            .slice(0, 20)
-            .map((target) => ({
-              id: target.id,
-              title: target.title,
-              description: target.description.slice(0, 3000),
-              indicators: target.indicators.slice(0, 5),
-              constraints: target.constraints.slice(0, 5),
-            })),
-          contextEntriesTruncated: state.entries.length > 30,
-          candidateCompletedRuns: evidence,
-        }),
-      });
-      const allowed = new Map(evidence.map((source) => [source.runId, source.threadId]));
-      if (
-        result.entries.some((entry) =>
-          entry.sourceRefs.some(
-            (source) =>
-              source.runId === null || allowed.get(RunId.make(source.runId)) !== source.threadId,
-          ),
+      const selection =
+        state.settings.journalModelSelection ?? DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION;
+      const targetsAtCapture = yield* targetFingerprint(projectId);
+      const entries: MonarchGeneratedContextEntry[] = [];
+      for (const source of evidence) {
+        const [saved] = yield* sql<{
+          entries_json: string;
+          revision: number;
+        }>`SELECT entries_json,revision FROM monarch_run_journals WHERE project_id=${projectId} AND run_id=${source.runId}`;
+        const revision = run.journalRevision ?? 1;
+        if (saved && saved.revision >= revision) {
+          entries.push(...(yield* decodeJournalEntries(saved.entries_json)));
+          continue;
+        }
+        yield* startStage(run, "journal", selection, [source.runId]);
+        const startedAt = yield* nowIso;
+        const provider = yield* selectedProvider(selection, projectId, true);
+        const messages = yield* sql<{
+          role: string;
+          text: string;
+        }>`SELECT role, substr(json_extract(payload_json,'$.text'),1,3000) AS text
+        FROM orchestration_v2_projection_messages WHERE thread_id=${source.threadId} AND run_id=${source.runId}
+          AND role IN ('user','assistant') AND streaming=0 ORDER BY created_at DESC,message_id DESC LIMIT 2`;
+        const currentEntries = state.entries
+          .filter(
+            (entry) =>
+              (entry.scope === "project" || entry.branch === source.branch) &&
+              (entry.pinned ||
+                entry.origin === "user" ||
+                !entry.sourceRefs.some((ref) => ref.runId === source.runId)),
+          )
+          .toSorted(
+            (a, b) =>
+              Number(b.pinned) - Number(a.pinned) ||
+              Number(b.evidence === "confirmed") - Number(a.evidence === "confirmed") ||
+              b.updatedAt.localeCompare(a.updatedAt),
+          )
+          .slice(0, 30)
+          .map(({ id, kind, title, body, scope, branch, evidence, pinned, origin }) => ({
+            id,
+            kind,
+            title,
+            body,
+            scope,
+            branch,
+            evidence,
+            pinned,
+            origin,
+          }));
+        const result = yield* provider.generateProjectContext!({
+          cwd: (yield* project(projectId)).workspace_root,
+          modelSelection: selection,
+          context: yield* encodeReviewContext({
+            instructions: state.settings.instructions,
+            currentEntries,
+            candidateCompletedRuns: [{ ...source, messages: messages.toReversed() }],
+          }),
+        });
+        const material = yield* Schema.decodeEffect(journalEntries)(result.entries);
+        if (
+          material.some(
+            (entry) =>
+              entry.sourceRefs.length === 0 ||
+              entry.sourceRefs.some(
+                (ref) => ref.runId !== source.runId || ref.threadId !== source.threadId,
+              ) ||
+              entry.scope !== (source.branch === null ? "project" : "branch") ||
+              entry.branch !== source.branch ||
+              entry.contradictsEntryIds.some(
+                (id) => !currentEntries.some((existing) => existing.id === id),
+              ),
+          )
         )
-      )
-        return yield* new MonarchScheduleError({ reason: "generation_failed" });
-      const applied = yield* sql.withTransaction(
+          return yield* new MonarchScheduleError({ reason: "generation_failed" });
+        yield* sql.withTransaction(
+          Effect.gen(function* () {
+            yield* requireClaim(run);
+            const fresh = yield* context.get({ projectId });
+            if (
+              fresh.revision !== state.revision ||
+              fresh.settings.paused ||
+              (yield* targetFingerprint(projectId)) !== targetsAtCapture
+            )
+              return yield* new MonarchScheduleError({ reason: "conflict" });
+            const originalScope = yield* context.sourceScope({
+              projectId,
+              runId: source.runId,
+              threadId: source.threadId,
+            });
+            if (
+              originalScope.branch !== source.branch ||
+              originalScope.worktreePath !== source.worktreePath
+            )
+              return yield* new MonarchScheduleError({ reason: "conflict" });
+            const materialJson = yield* encodeContext(material);
+            const modelJson = yield* encodeContext(selection);
+            const recordedAt = yield* nowIso;
+            if (saved) {
+              yield* sql`UPDATE monarch_run_journals SET revision=${revision},entries_json=${materialJson},review_run_id=${run.id},
+                model_json=${modelJson},started_at=${startedAt},recorded_at=${recordedAt}
+                WHERE project_id=${projectId} AND run_id=${source.runId} AND revision=${saved.revision}`;
+            } else {
+              yield* sql`INSERT INTO monarch_run_journals(project_id,run_id,thread_id,completed_at,branch,worktree_path,entries_json,review_run_id,model_json,started_at,recorded_at,revision)
+                VALUES(${projectId},${source.runId},${source.threadId},${source.completedAt},${source.branch},${source.worktreePath},${materialJson},${run.id},${modelJson},${startedAt},${recordedAt},${revision})`;
+            }
+          }),
+        );
+        entries.push(...material);
+      }
+      return yield* sql.withTransaction(
         Effect.gen(function* () {
-          if ((yield* targetFingerprint(schedule.projectId)) !== targetsAtCapture)
+          yield* requireClaim(run);
+          if ((yield* targetFingerprint(projectId)) !== targetsAtCapture)
             return yield* new MonarchScheduleError({ reason: "conflict" });
           const updated = yield* context.applyGenerated({
-            projectId: schedule.projectId,
+            projectId,
             expectedRevision: state.revision,
             generationId: run.id,
-            entries: result.entries.map((entry) => ({
-              ...entry,
-              sourceRefs: entry.sourceRefs.map((source) => ({
-                threadId: ThreadId.make(source.threadId),
-                runId: source.runId === null ? null : RunId.make(source.runId),
-              })),
-            })),
+            entries,
           });
-          // An applied extraction is never repeated merely because later suggestion inference failed.
-          yield* sql`UPDATE monarch_continuity_sources SET captured=1 WHERE project_id=${schedule.projectId} AND run_id IN ${sql.in(run.sourceRunIds!)}`;
-          const persistedRun = {
-            ...run,
-            contextRevision: updated.revision,
-            contextEntryIds: updated.entries
-              .filter((entry) => entry.generationId === run.id)
-              .map((entry) => entry.id),
-            summary,
-          };
-          yield* sql`UPDATE monarch_review_runs SET payload_json=${yield* encodeRun(persistedRun)} WHERE id=${run.id}`;
-          return updated;
+          const entryIds = updated.entries
+            .filter((entry) => entry.generationId === run.id)
+            .map((entry) => entry.id);
+          yield* sql`UPDATE monarch_continuity_sources SET captured=1 WHERE project_id=${projectId} AND journal_revision=${run.journalRevision ?? 1} AND run_id IN ${sql.in(run.sourceRunIds!)}`;
+          yield* sql`UPDATE monarch_review_runs SET payload_json=${yield* encodeRun({ ...run, contextRevision: updated.revision, contextEntryIds: entryIds, summary })} WHERE id=${run.id}`;
+          yield* sql`UPDATE monarch_review_stages SET status='succeeded',completed_at=${yield* nowIso} WHERE review_run_id=${run.id} AND stage='journal'`;
+          return { state: updated, entryIds, summary };
         }),
       );
-      return {
-        state: applied,
-        summary,
-        entryIds: applied.entries
-          .filter((entry) => entry.generationId === run.id)
-          .map((entry) => entry.id),
-      };
     },
     Effect.mapError((cause) =>
       isScheduleError(cause)
@@ -714,12 +782,73 @@ const make = Effect.gen(function* () {
     ),
   );
 
+  const reviewScope = Effect.fn("MonarchScheduler.reviewScope")(function* (
+    run: MonarchScheduleRun,
+    excluded: ReadonlyArray<ThreadId>,
+  ) {
+    const origin = run.reviewScopeRunId ?? run.sourceRunIds?.[0];
+    if (!origin) return null;
+    const [source] = yield* completedSources(run.projectId, excluded, [origin], 1);
+    return source?.scopeKnown ? source : null;
+  });
+
+  const recentJournals = Effect.fn("MonarchScheduler.recentJournals")(function* (
+    state: MonarchContextState,
+    scope: { branch: string | null; worktreePath: string | null } | null,
+  ) {
+    const excluded = state.settings.excludedThreadIds;
+    const rows = yield* sql<{
+      runId: RunId;
+      threadId: ThreadId;
+      branch: string | null;
+      worktreePath: string | null;
+      completedAt: string;
+      revision: number;
+      entries_json: string;
+    }>`
+      SELECT j.run_id AS runId,j.thread_id AS threadId,j.branch,j.worktree_path AS worktreePath,j.completed_at AS completedAt,j.revision,j.entries_json
+      FROM monarch_run_journals j
+      JOIN orchestration_v2_projection_threads t ON t.thread_id=j.thread_id AND t.project_id=j.project_id
+      JOIN orchestration_v2_projection_runs r ON r.run_id=j.run_id AND r.thread_id=j.thread_id
+      WHERE j.project_id=${state.projectId} AND r.status='completed' AND t.deleted_at IS NULL AND j.entries_json!='[]'
+        AND ((j.branch IS NULL AND j.worktree_path IS NULL) OR (j.branch=${scope?.branch ?? null} AND j.worktree_path IS ${scope?.worktreePath ?? null}))
+        AND ${excluded.length ? sql`j.thread_id NOT IN ${sql.in(excluded)}` : sql`1`}
+      ORDER BY j.completed_at DESC,j.run_id DESC LIMIT 10`;
+    const journals = yield* Effect.forEach(rows, ({ entries_json, ...source }) =>
+      decodeJournalEntries(entries_json).pipe(
+        Effect.map((entries) => ({ ...source, evidence: "reported" as const, entries })),
+      ),
+    );
+    const known = new Set(state.entries.map(MonarchContextService.materialKey));
+    const keys = journals.flatMap((journal) =>
+      journal.entries.map(MonarchContextService.materialKey),
+    );
+    const historical = keys.length
+      ? yield* sql<{ material_key: string }>`SELECT material_key FROM monarch_context_material_keys
+      WHERE project_id=${state.projectId} AND material_key IN ${sql.in(keys)}`
+      : [];
+    const superseded = new Set(
+      historical.map((row) => row.material_key).filter((key) => !known.has(key)),
+    );
+    return journals
+      .map((journal) => ({
+        ...journal,
+        entries: journal.entries.filter(
+          (entry) =>
+            !superseded.has(MonarchContextService.materialKey(entry)) &&
+            entry.contradictsEntryIds.every((id) =>
+              state.entries.some((existing) => existing.id === id),
+            ),
+        ),
+      }))
+      .filter((journal) => journal.entries.length > 0);
+  });
+
   const generate = Effect.fn("MonarchScheduler.generate")(
     function* (schedule: MonarchReviewSchedule, run: MonarchScheduleRun) {
       const currentProject = yield* project(schedule.projectId);
       if (currentProject.archived_at !== null)
         return yield* new MonarchScheduleError({ reason: "not_found" });
-      const provider = yield* selectedProvider(schedule.modelSelection, schedule.projectId);
       const captured = yield* captureContext(schedule, run);
       const contextState = captured.state;
       const state = yield* monarch.list({ projectId: schedule.projectId });
@@ -739,53 +868,58 @@ const make = Effect.gen(function* () {
       // A completed conversational reply alone is not a meaningful project outcome.
       if (run.trigger === "work-completed" && run.updateContext && captured.entryIds.length === 0)
         return { ...metadata, suggestions: [] };
-      const evidence = (yield* completedSources(
-        schedule.projectId,
-        contextState.settings.excludedThreadIds,
-        undefined,
-        10,
-      )).filter((source) => source.scopeKnown);
+      const scope = yield* reviewScope(run, contextState.settings.excludedThreadIds);
+      const evidence = yield* recentJournals(contextState, scope);
+      yield* startStage(run, "suggestions", schedule.modelSelection, []);
+      const provider = yield* selectedProvider(schedule.modelSelection, schedule.projectId);
       const work = yield* activeWork(schedule.projectId, contextState.settings.excludedThreadIds);
-      const brief = yield* context.brief({ projectId: schedule.projectId });
+      const brief = yield* context.brief({
+        projectId: schedule.projectId,
+        branch: scope?.branch ?? null,
+      });
+      const promptContext = yield* encodeReviewContext({
+        project: currentProject.title.slice(0, 200),
+        reviewInstructions: schedule.instructions,
+        projectContext: brief,
+        projectInstructions: contextState.settings.instructions,
+        activeWork: work,
+        targets: targets.map((target) => ({
+          id: target.id,
+          revision: target.revision,
+          title: target.title,
+          description: target.description.slice(0, 3000),
+          indicators: target.indicators.slice(0, 5).map((v) => v.slice(0, 500)),
+          constraints: target.constraints.slice(0, 5).map((v) => v.slice(0, 500)),
+        })),
+        completedTurnJournals: evidence,
+        existingSuggestions: [
+          ...state.suggestions
+            .filter(
+              (s) =>
+                s.status === "suggested" &&
+                !s.sourceThreadIds.some((id) =>
+                  contextState.settings.excludedThreadIds.includes(id),
+                ),
+            )
+            .slice(0, 30),
+          ...state.suggestions
+            .filter(
+              (s) =>
+                s.status !== "suggested" &&
+                !s.sourceThreadIds.some((id) =>
+                  contextState.settings.excludedThreadIds.includes(id),
+                ),
+            )
+            .slice(0, 20),
+        ].map((s) => ({ title: s.title, prompt: s.prompt.slice(0, 1000), status: s.status })),
+      });
+      yield* sql`UPDATE monarch_review_stages SET source_run_ids_json=${yield* encodeContext(evidence.map((source) => source.runId))},
+        source_refs_json=${yield* encodeContext(evidence.map(({ runId, revision }) => ({ runId, revision })))}
+        WHERE review_run_id=${run.id} AND stage='suggestions'`;
       const response = yield* provider.generateProjectSuggestions!({
         cwd: currentProject.workspace_root,
         modelSelection: schedule.modelSelection,
-        context: yield* encodeReviewContext({
-          project: currentProject.title.slice(0, 200),
-          reviewInstructions: schedule.instructions,
-          projectContext: brief,
-          projectInstructions: contextState.settings.instructions,
-          activeWork: work,
-          targets: targets.map((target) => ({
-            id: target.id,
-            revision: target.revision,
-            title: target.title,
-            description: target.description.slice(0, 3000),
-            indicators: target.indicators.slice(0, 5).map((v) => v.slice(0, 500)),
-            constraints: target.constraints.slice(0, 5).map((v) => v.slice(0, 500)),
-          })),
-          completedThreads: evidence,
-          existingSuggestions: [
-            ...state.suggestions
-              .filter(
-                (s) =>
-                  s.status === "suggested" &&
-                  !s.sourceThreadIds.some((id) =>
-                    contextState.settings.excludedThreadIds.includes(id),
-                  ),
-              )
-              .slice(0, 30),
-            ...state.suggestions
-              .filter(
-                (s) =>
-                  s.status !== "suggested" &&
-                  !s.sourceThreadIds.some((id) =>
-                    contextState.settings.excludedThreadIds.includes(id),
-                  ),
-              )
-              .slice(0, 20),
-          ].map((s) => ({ title: s.title, prompt: s.prompt.slice(0, 1000), status: s.status })),
-        }),
+        context: promptContext,
       });
       // Reject invented evidence instead of silently laundering it into a suggestion.
       const targetById = new Map(targets.map((target) => [target.id, target]));
@@ -853,12 +987,21 @@ const make = Effect.gen(function* () {
           : interrupted
             ? "interrupted"
             : "failed";
+        const [openStage] = yield* sql<{
+          stage: string;
+        }>`SELECT stage FROM monarch_review_stages WHERE review_run_id=${run.id} AND status='running'`;
+        const stageName = openStage?.stage === "journal" ? "Journal" : "Review";
+        const failure = Exit.isFailure(result) ? Cause.squash(result.cause) : null;
         const error = Exit.isSuccess(result)
           ? null
           : interrupted
-            ? "Review interrupted. It will not be replayed."
-            : "Review failed. Check the selected provider and try Run now.";
+            ? `${stageName} interrupted. Retry when ready.`
+            : isScheduleError(failure) && failure.reason === "provider_unavailable"
+              ? `Choose an available ${stageName.toLowerCase()} model and reasoning option in Suggestion settings, then retry.`
+              : `${stageName} failed. Check the project and selected provider, then retry.`;
         const suggestionIds: string[] = [];
+        yield* sql`UPDATE monarch_review_stages SET status=${status},completed_at=${now},error=${error}
+          WHERE review_run_id=${run.id} AND status='running'`;
         if (Exit.isSuccess(result)) {
           const currentContext = yield* context.get({ projectId: schedule.projectId });
           if (
@@ -917,15 +1060,34 @@ const make = Effect.gen(function* () {
             const [remaining] = yield* sql<{
               count: number;
             }>`SELECT COUNT(*) AS count FROM monarch_continuity_sources WHERE project_id=${run.projectId} AND captured=0 AND ${latestContext.settings.excludedThreadIds.length ? sql`thread_id NOT IN ${sql.in(latestContext.settings.excludedThreadIds)}` : sql`1`}`;
-            if (run.updateContext && (remaining?.count ?? 0) > 0)
-              yield* sql`UPDATE monarch_continuity_queue SET requested_version=MAX(requested_version,attempted_version+1),update_context=update_context | ${run.trigger === "build-context" || run.trigger === "refresh" || run.trigger === "retry" ? 1 : 2}
-              WHERE project_id=${run.projectId}`;
+            if (run.updateContext && (remaining?.count ?? 0) > 0) {
+              const followup =
+                run.trigger === "retry"
+                  ? latestContext.settings.enabled && latestContext.settings.autoUpdateContext
+                    ? "work-completed"
+                    : "build-context"
+                  : run.trigger;
+              const explicit = followup === "build-context" || followup === "refresh";
+              const suggest =
+                followup === "refresh"
+                  ? 1
+                  : !explicit && latestContext.settings.suggestAfterWork
+                    ? 2
+                    : 0;
+              yield* sql`UPDATE monarch_continuity_queue SET
+                trigger=CASE WHEN requested_version<=attempted_version THEN ${followup} ELSE trigger END,
+                requested_version=MAX(requested_version,attempted_version+1),update_context=update_context | ${explicit ? 1 : 2},
+                update_suggestions=update_suggestions | ${suggest}
+                WHERE project_id=${run.projectId}`;
+            }
           }
         }
         // Runs that produced suggestions remain as provenance, even beyond the recent history window.
         yield* sql`DELETE FROM monarch_review_runs WHERE schedule_id = ${schedule.id}
           AND json_array_length(payload_json, '$.suggestionIds') = 0
-          AND COALESCE(json_array_length(payload_json,'$.contextEntryIds'),0)=0 AND id NOT IN
+          AND COALESCE(json_array_length(payload_json,'$.contextEntryIds'),0)=0
+          AND NOT EXISTS (SELECT 1 FROM monarch_review_stages WHERE review_run_id=monarch_review_runs.id)
+          AND id NOT IN
         (SELECT id FROM monarch_review_runs WHERE schedule_id = ${schedule.id} ORDER BY started_at DESC, id DESC LIMIT 100)`;
       }),
     );
@@ -976,8 +1138,6 @@ const make = Effect.gen(function* () {
         if ((projectBusy?.count ?? 0) > 0)
           return yield* new MonarchScheduleError({ reason: "busy" });
         const contextState = yield* context.get({ projectId: input.projectId });
-        if (managed && contextState.settings.modelSelection === null)
-          return yield* new MonarchScheduleError({ reason: "paused" });
         if (managed && contextState.settings.modelSelection)
           schedule = {
             ...schedule,
@@ -1004,21 +1164,33 @@ const make = Effect.gen(function* () {
         const currentProject = yield* project(input.projectId);
         if (currentProject.archived_at !== null)
           return yield* new MonarchScheduleError({ reason: "not_found" });
-        if (!managed && contextState.settings.enabled && contextState.settings.autoUpdateContext) {
-          yield* ensureQueue(contextState, schedule.modelSelection);
-          yield* enqueueSources(
-            input.projectId,
-            yield* completedSources(input.projectId, contextState.settings.excludedThreadIds),
-          );
-        }
         const [queue] =
           yield* sql<ContinuityQueue>`SELECT * FROM monarch_continuity_queue WHERE project_id=${input.projectId}`;
         if (managed && (!queue || queue.requested_version <= queue.attempted_version)) return null;
-        const sourceRows = yield* sql<{
-          run_id: RunId;
-        }>`SELECT run_id FROM monarch_continuity_sources WHERE project_id=${input.projectId} AND captured=0
+        if (managed && queue?.update_suggestions && !contextState.settings.modelSelection)
+          return yield* new MonarchScheduleError({ reason: "paused" });
+        if (managed)
+          yield* sql`UPDATE monarch_continuity_sources SET captured=2 WHERE project_id=${input.projectId} AND captured=0 AND NOT EXISTS(
+          SELECT 1 FROM orchestration_v2_projection_threads t JOIN orchestration_v2_projection_runs r ON r.thread_id=t.thread_id
+          WHERE t.project_id=${input.projectId} AND t.thread_id=monarch_continuity_sources.thread_id AND t.deleted_at IS NULL
+          AND r.run_id=monarch_continuity_sources.run_id AND r.status='completed')`;
+        const [priorAttempt] =
+          trigger === "retry"
+            ? yield* sql<PayloadRow>`SELECT payload_json FROM monarch_review_runs WHERE schedule_id=${schedule.id}
+          ORDER BY started_at DESC,rowid DESC LIMIT 1`
+            : [];
+        const retriedRun = priorAttempt ? yield* decodeRun(priorAttempt.payload_json) : null;
+        const sourceRows = !managed
+          ? []
+          : yield* sql<{
+              run_id: RunId;
+              journal_revision: number;
+            }>`SELECT run_id,journal_revision FROM monarch_continuity_sources WHERE project_id=${input.projectId} AND captured=0
           AND ${contextState.settings.excludedThreadIds.length ? sql`thread_id NOT IN ${sql.in(contextState.settings.excludedThreadIds)}` : sql`1`}
-          ORDER BY event_sequence,run_id LIMIT 20`;
+          AND ${retriedRun ? sql`run_id=${retriedRun.sourceRunIds?.[0] ?? retriedRun.reviewScopeRunId ?? null}` : sql`1`}
+          ORDER BY event_sequence,run_id LIMIT 1`;
+        const scopeSource =
+          retriedRun?.reviewScopeRunId ?? retriedRun?.sourceRunIds?.[0] ?? sourceRows[0]?.run_id;
         const run: MonarchScheduleRun = {
           id: `review-run:${yield* random.uuidV4()}`,
           scheduleId: schedule.id,
@@ -1031,15 +1203,19 @@ const make = Effect.gen(function* () {
           error: null,
           modelSelection: schedule.modelSelection,
           suggestionIds: [],
+          ...(retriedRun ? { retryOfRunId: retriedRun.id } : {}),
+          ...(scopeSource ? { reviewScopeRunId: scopeSource } : {}),
+          ...(sourceRows[0] ? { journalRevision: sourceRows[0].journal_revision } : {}),
           sourceRunIds: sourceRows.map((source) => source.run_id),
+          contextRevision: contextState.revision,
           // Queue capability bits retain explicit/manual (1), completed work (2), and Target (4) causes.
-          updateContext: managed
-            ? !!queue &&
-              ((queue.update_context & 1) !== 0 ||
-                ((queue.update_context & 2) !== 0 &&
-                  contextState.settings.enabled &&
-                  contextState.settings.autoUpdateContext))
-            : contextState.settings.enabled && contextState.settings.autoUpdateContext,
+          updateContext:
+            managed &&
+            !!queue &&
+            ((queue.update_context & 1) !== 0 ||
+              ((queue.update_context & 2) !== 0 &&
+                contextState.settings.enabled &&
+                contextState.settings.autoUpdateContext)),
           updateSuggestions: managed
             ? !!queue &&
               ((queue.update_suggestions & 1) !== 0 ||
@@ -1074,7 +1250,7 @@ const make = Effect.gen(function* () {
         VALUES (${run.id}, ${schedule.id}, ${schedule.projectId}, 'running', ${now}, ${leaseUntil}, ${yield* encodeRun(run)})`;
         // Retire the entire committed backlog when capture is off. New arrivals after
         // this transaction remain pending; a later explicit Build may revive ignored sources.
-        if (managed && !run.updateContext)
+        if (managed && !run.updateContext && !retriedRun)
           yield* sql`UPDATE monarch_continuity_sources SET captured=2 WHERE project_id=${input.projectId} AND captured=0`;
         if (managed && queue)
           yield* sql`UPDATE monarch_continuity_queue SET attempted_version=requested_version,update_context=0,update_suggestions=0 WHERE project_id=${input.projectId}`;
@@ -1121,39 +1297,47 @@ const make = Effect.gen(function* () {
     if ((yield* project(input.projectId)).archived_at !== null)
       return yield* new MonarchScheduleError({ reason: "not_found" });
     const state = yield* context.get({ projectId: input.projectId });
-    if (!state.settings.modelSelection)
-      return yield* new MonarchScheduleError({ reason: "provider_unavailable" });
-    yield* selectedProvider(state.settings.modelSelection, input.projectId);
-    const queue = yield* ensureQueue(state);
-    const candidates = yield* completedSources(
-      input.projectId,
-      state.settings.excludedThreadIds,
-      undefined,
-      50,
+    if (
+      (input.mode === "build-context" && !input.threadIds?.length) ||
+      (input.reanalyze && input.mode !== "build-context")
+    )
+      return yield* new MonarchScheduleError({ reason: "invalid" });
+    const queue = yield* ensureQueue(
+      state,
+      state.settings.journalModelSelection ?? DEFAULT_MONARCH_JOURNAL_MODEL_SELECTION,
     );
+    const candidates =
+      input.mode === "build-context" && input.threadIds?.length
+        ? yield* completedSources(input.projectId, state.settings.excludedThreadIds, undefined, 50)
+        : [];
     if (input.threadIds?.some((id) => !candidates.some((source) => source.threadId === id)))
       return yield* new MonarchScheduleError({ reason: "invalid" });
-    const prior = yield* sql<{
-      run_id: RunId;
-    }>`SELECT run_id FROM monarch_continuity_sources WHERE project_id=${input.projectId} AND captured=1 AND run_id IN ${sql.in(candidates.map((source) => source.runId))}`;
-    const captured = new Set(prior.map((row) => row.run_id));
-    const selected = candidates
-      .filter(
-        (source) =>
-          (!input.threadIds || input.threadIds.includes(source.threadId)) &&
-          !captured.has(source.runId),
-      )
-      .slice(0, 20);
+    const selected = candidates.filter((source) => input.threadIds?.includes(source.threadId));
     const pending = yield* sql.withTransaction(
       Effect.gen(function* () {
-        yield* enqueueSources(input.projectId, selected, true);
+        for (const source of selected) {
+          const [saved] = yield* sql<{
+            revision: number;
+          }>`SELECT revision FROM monarch_run_journals WHERE project_id=${input.projectId} AND run_id=${source.runId}`;
+          if (saved && !input.reanalyze) continue;
+          yield* enqueueSources(input.projectId, [source]);
+          yield* sql`UPDATE monarch_continuity_sources SET captured=0,journal_revision=${(saved?.revision ?? 0) + 1}
+            WHERE project_id=${input.projectId} AND run_id=${source.runId}`;
+        }
         let updateSuggestions = input.mode !== "build-context";
         if (input.mode === "retry") {
+          if (
+            (yield* read({ projectId: input.projectId, id: queue.schedule_id })).activeRunId !==
+            null
+          )
+            return yield* new MonarchScheduleError({ reason: "busy" });
           const [last] =
-            yield* sql<PayloadRow>`SELECT payload_json FROM monarch_review_runs WHERE project_id=${input.projectId} AND schedule_id=${queue.schedule_id} ORDER BY started_at DESC,id DESC LIMIT 1`;
+            yield* sql<PayloadRow>`SELECT payload_json FROM monarch_review_runs WHERE project_id=${input.projectId} AND schedule_id=${queue.schedule_id} ORDER BY started_at DESC,rowid DESC LIMIT 1`;
           if (last)
             updateSuggestions = (yield* decodeRun(last.payload_json)).updateSuggestions !== false;
         }
+        if (updateSuggestions && !state.settings.modelSelection)
+          return yield* new MonarchScheduleError({ reason: "provider_unavailable" });
         yield* sql`UPDATE monarch_continuity_queue SET requested_version=MAX(requested_version,attempted_version+1),trigger=${input.mode},
         update_context=update_context | 1,update_suggestions=update_suggestions | ${updateSuggestions ? 1 : 0},last_error=NULL WHERE project_id=${input.projectId}`;
         const [updated] =
@@ -1192,7 +1376,7 @@ const make = Effect.gen(function* () {
       ((queue.update_context | queue.update_suggestions) & 1) === 0;
     const blockedReason =
       state.settings.paused ||
-      (pending && state.settings.modelSelection === null) ||
+      (pending && !!queue?.update_suggestions && state.settings.modelSelection === null) ||
       (automaticPending && !state.settings.enabled)
         ? "paused"
         : pending && queue?.last_error && queue.requested_version <= queue.attempted_version

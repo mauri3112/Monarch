@@ -1,3 +1,4 @@
+import { ProjectOverviewRow } from "./ProjectOverviewRow";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -105,10 +106,20 @@ export function ProjectPlanning({
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [failedUsedAcknowledgement, setFailedUsedAcknowledgement] = useState<string | null>(null);
-  const targets = query.data?.targets.filter((target) => target.status !== "archived") ?? [];
+  const targets =
+    query.data?.targets.filter(
+      (target) =>
+        target.status !== "archived" ||
+        (dock?.selection?.entityKind === "target" && dock.selection.entityId === target.id),
+    ) ?? [];
   const archivedTargets =
     query.data?.targets.filter((target) => target.status === "archived") ?? [];
-  const suggestions = query.data?.suggestions.filter((item) => item.status === "suggested") ?? [];
+  const suggestions =
+    query.data?.suggestions.filter(
+      (item) =>
+        item.status === "suggested" ||
+        (dock?.selection?.entityKind === "suggestion" && dock.selection.entityId === item.id),
+    ) ?? [];
   const removedSuggestions =
     query.data?.suggestions.filter((item) => item.status === "dismissed") ?? [];
   const usedSuggestions = query.data?.suggestions.filter((item) => item.status === "used") ?? [];
@@ -248,8 +259,120 @@ export function ProjectPlanning({
     query.refresh();
   }
 
+  const selectedTarget =
+    dock?.selection?.entityKind === "target"
+      ? query.data?.targets.find((target) => target.id === dock.selection?.entityId)
+      : null;
+  const selectedSuggestion =
+    dock?.selection?.entityKind === "suggestion"
+      ? query.data?.suggestions.find((item) => item.id === dock.selection?.entityId)
+      : null;
+  const selectedSuggestionStale =
+    selectedSuggestion?.targets.some(
+      (ref) => targetById.get(ref.targetId)?.revision !== ref.revision,
+    ) ||
+    (selectedSuggestion?.contextRevision !== undefined &&
+      selectedSuggestion.contextRevision !== contextQuery.data?.revision);
+
+  async function changeTargetStatus(item: MonarchTarget, status: MonarchTargetStatus) {
+    setBusyId(item.id);
+    const result = await updateTarget({
+      environmentId,
+      input: {
+        projectId,
+        id: item.id,
+        expectedRevision: item.revision,
+        status,
+        title: item.title,
+        description: item.description,
+        indicators: item.indicators,
+        constraints: item.constraints,
+      },
+    });
+    setBusyId(null);
+    if (result._tag === "Failure") {
+      if (!isAtomCommandInterrupted(result)) setError(String(squashAtomCommandFailure(result)));
+    } else query.refresh();
+  }
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-4">
+      {dock?.activeKind === "timeline" && dock.actionHost
+        ? createPortal(
+            <>
+              {selectedTarget ? (
+                <>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    disabled={!canEdit}
+                    onClick={() => setEditingTarget(selectedTarget)}
+                  >
+                    <PencilIcon /> Edit Target
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost-muted"
+                    disabled={!canEdit || busyId === selectedTarget.id}
+                    onClick={() =>
+                      void changeTargetStatus(
+                        selectedTarget,
+                        selectedTarget.status === "archived" ? "active" : "archived",
+                      )
+                    }
+                  >
+                    {selectedTarget.status === "archived" ? "Restore Target" : "Archive Target"}
+                  </Button>
+                </>
+              ) : null}
+              {selectedSuggestion ? (
+                <>
+                  {selectedSuggestion.status === "suggested" ? (
+                    <>
+                      <Button
+                        size="xs"
+                        disabled={
+                          !canEdit ||
+                          selectedSuggestionStale ||
+                          draft.preparingId === selectedSuggestion.id
+                        }
+                        onClick={() => void draft.prepare(selectedSuggestion)}
+                      >
+                        {selectedSuggestion.draftThreadId ? "Continue draft" : "Use"}
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="outline"
+                        disabled={!canEdit}
+                        onClick={() => setEditingSuggestion(selectedSuggestion)}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        size="xs"
+                        variant="ghost-muted"
+                        disabled={!canEdit || busyId === selectedSuggestion.id}
+                        onClick={() => void changeSuggestionStatus(selectedSuggestion, "dismissed")}
+                      >
+                        Remove
+                      </Button>
+                    </>
+                  ) : selectedSuggestion.status === "dismissed" ? (
+                    <Button
+                      size="xs"
+                      variant="outline"
+                      disabled={!canEdit}
+                      onClick={() => void changeSuggestionStatus(selectedSuggestion, "suggested")}
+                    >
+                      Restore suggestion
+                    </Button>
+                  ) : null}
+                </>
+              ) : null}
+            </>,
+            dock.actionHost,
+          )
+        : null}
       {query.error ? (
         <div
           role="alert"
@@ -296,7 +419,7 @@ export function ProjectPlanning({
           Loading project planning…
         </p>
       ) : null}
-      <section aria-labelledby="monarch-targets-heading">
+      <section aria-labelledby="monarch-targets-heading" className="border-t border-border pt-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <h2 id="monarch-targets-heading" className="text-base font-medium tracking-tight">
@@ -312,15 +435,22 @@ export function ProjectPlanning({
             <PlusIcon /> Add target
           </Button>
         </div>
-        {editingTarget ? (
-          <TargetEditor
-            key={editingTarget === "new" ? "new" : editingTarget.id}
-            target={editingTarget === "new" ? null : editingTarget}
-            busy={busyId === "target"}
-            onSave={(input) => void saveTarget(input)}
-            onCancel={() => setEditingTarget(null)}
-          />
-        ) : null}
+        {editingTarget
+          ? (() => {
+              const editor = (
+                <TargetEditor
+                  key={editingTarget === "new" ? "new" : editingTarget.id}
+                  target={editingTarget === "new" ? null : editingTarget}
+                  busy={busyId === "target"}
+                  onSave={(input) => void saveTarget(input)}
+                  onCancel={() => setEditingTarget(null)}
+                />
+              );
+              return dock?.activeKind === "timeline" && dock.actionHost && editingTarget !== "new"
+                ? createPortal(<div className="w-full">{editor}</div>, dock.actionHost)
+                : editor;
+            })()
+          : null}
         {query.data && targets.length === 0 && !editingTarget ? (
           <div className="mt-4 rounded-xl border border-dashed border-border px-4 py-5">
             <p className="text-sm font-medium">Set a direction</p>
@@ -330,41 +460,53 @@ export function ProjectPlanning({
           </div>
         ) : null}
         {targets.length > 0 ? (
-          <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(min(240px,100%),1fr))] gap-2.5">
-            {targets.map((target) => (
-              <article
-                key={target.id}
-                className="flex min-w-0 flex-col rounded-xl border border-border bg-card p-4"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <span className="rounded-full border border-border px-2 py-0.5 text-3xs text-muted-foreground">
-                    {STATUS_LABEL[target.status]}
-                  </span>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={`Edit target ${target.title}`}
-                    disabled={!canEdit}
-                    onClick={() => setEditingTarget(target)}
-                  >
-                    <PencilIcon />
-                  </Button>
-                </div>
-                <h3 className="mt-3 text-sm font-medium leading-snug break-words">
-                  {target.title}
-                </h3>
-                {target.description ? (
-                  <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground break-words">
-                    {target.description}
-                  </p>
-                ) : null}
-                {target.indicators.length ? (
-                  <p className="mt-auto pt-3 text-2xs text-muted-foreground">
-                    Signs of progress · {target.indicators.join(" · ")}
-                  </p>
-                ) : null}
-              </article>
-            ))}
+          <div className="mt-2 space-y-0.5">
+            {targets.map((target) =>
+              dock ? (
+                <ProjectOverviewRow
+                  key={target.id}
+                  dock={dock}
+                  kind="target"
+                  entityId={target.id}
+                  title={target.title}
+                  subtitle={STATUS_LABEL[target.status]}
+                />
+              ) : (
+                <article
+                  key={target.id}
+                  className="flex min-w-0 flex-col rounded-lg border border-border bg-card px-4 py-3 data-[timeline-selected=true]:border-ring data-[timeline-selected=true]:bg-accent data-[timeline-hovered=true]:bg-accent/60"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="rounded-full border border-border px-2 py-0.5 text-3xs text-muted-foreground">
+                      {STATUS_LABEL[target.status]}
+                    </span>
+                    <Button
+                      hidden={dock !== null}
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Edit target ${target.title}`}
+                      disabled={!canEdit}
+                      onClick={() => setEditingTarget(target)}
+                    >
+                      <PencilIcon />
+                    </Button>
+                  </div>
+                  <h3 className="mt-1 text-sm font-medium leading-snug break-words">
+                    {target.title}
+                  </h3>
+                  {target.description && !dock ? (
+                    <p className="mt-1.5 text-xs leading-relaxed text-muted-foreground break-words">
+                      {target.description}
+                    </p>
+                  ) : null}
+                  {target.indicators.length && !dock ? (
+                    <p className="mt-auto pt-3 text-2xs text-muted-foreground">
+                      Signs of progress · {target.indicators.join(" · ")}
+                    </p>
+                  ) : null}
+                </article>
+              ),
+            )}
           </div>
         ) : null}
         {archivedTargets.length ? (
@@ -396,7 +538,7 @@ export function ProjectPlanning({
       {children}
       <section
         aria-labelledby="monarch-suggestions-heading"
-        className="border-t border-border pt-7"
+        className="border-t border-border pt-4"
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -429,7 +571,7 @@ export function ProjectPlanning({
           </div>
         ) : null}
         {suggestions.length ? (
-          <div className="mt-4 space-y-2.5">
+          <div className="mt-2 space-y-0.5">
             {suggestions.map((item) => {
               const targetStale = item.targets.some(
                 (ref) => targetById.get(ref.targetId)?.revision !== ref.revision,
@@ -442,10 +584,49 @@ export function ProjectPlanning({
                 contextQuery.data?.settings.excludedThreadIds.includes(id),
               );
               const stale = targetStale || contextStale;
+              if (dock)
+                return (
+                  <div key={item.id}>
+                    <ProjectOverviewRow
+                      dock={dock}
+                      kind="suggestion"
+                      entityId={item.id}
+                      title={item.title}
+                      subtitle={
+                        item.status === "dismissed"
+                          ? "Removed"
+                          : item.status === "used"
+                            ? "Used"
+                            : stale
+                              ? "Needs review"
+                              : item.draftThreadId
+                                ? "Editable draft"
+                                : "Suggested"
+                      }
+                    />
+                    {editingSuggestion?.id === item.id && dock.actionHost
+                      ? createPortal(
+                          <div className="w-full">
+                            <SuggestionEditor
+                              suggestion={item}
+                              currentTargets={targetById}
+                              targetStale={targetStale}
+                              contextStale={contextStale}
+                              currentContextRevision={contextQuery.data?.revision}
+                              busy={busyId === item.id}
+                              onSave={(input) => void saveSuggestion(input)}
+                              onCancel={() => setEditingSuggestion(null)}
+                            />
+                          </div>,
+                          dock.actionHost,
+                        )
+                      : null}
+                  </div>
+                );
               return (
                 <article
                   key={item.id}
-                  className="rounded-xl border border-warning/30 bg-warning-surface/40 p-4"
+                  className="rounded-lg border border-warning/30 bg-warning-surface/40 px-4 py-3 data-[timeline-selected=true]:border-ring"
                 >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="rounded-full bg-warning/12 px-2 py-0.5 text-3xs font-medium text-warning-foreground">
@@ -462,7 +643,7 @@ export function ProjectPlanning({
                       </span>
                     ) : null}
                   </div>
-                  <h3 className="mt-2.5 text-sm font-medium leading-snug break-words">
+                  <h3 className="mt-2 text-sm font-medium leading-snug break-words">
                     {item.title}
                   </h3>
                   {item.rationale ? (
@@ -524,7 +705,11 @@ export function ProjectPlanning({
                       onCancel={() => setEditingSuggestion(null)}
                     />
                   ) : null}
-                  <div className="mt-4 flex flex-wrap gap-2 border-t border-warning/20 pt-3">
+                  <div
+                    className={
+                      dock ? "hidden" : "mt-4 flex flex-wrap gap-2 border-t border-warning/20 pt-3"
+                    }
+                  >
                     <Button
                       size="xs"
                       disabled={

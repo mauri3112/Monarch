@@ -10,6 +10,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Deferred from "effect/Deferred";
 import * as Fiber from "effect/Fiber";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Result from "effect/Result";
@@ -135,9 +136,150 @@ it.layer(testLayer)("Monarch planning", (it) => {
           payload: string;
         }>`SELECT payload_json AS payload FROM monarch_targets WHERE id = ${target.id}`;
         assert.strictEqual(JSON.parse(persisted[0]!.payload).revision, current.revision);
+        const timeline = yield* service.timeline({ projectId });
+        assert.deepEqual(
+          timeline.events.filter((e) => e.entityId === target.id).map((e) => e.action),
+          [
+            "Target added",
+            "Target paused",
+            "Target restored",
+            "Target achieved",
+            "Target archived",
+            "Target restored",
+          ],
+        );
       }),
   );
 
+  it.effect(
+    "pages same-time events, locates an older item and clears answered input within the project",
+    () =>
+      Effect.gen(function* () {
+        const { projectId, service, target } = yield* fixture("timeline");
+        const other = yield* fixture("timeline-foreign");
+        const sql = yield* SqlClient.SqlClient;
+        const thread = ThreadId.make("timeline-source");
+        yield* insertThread(projectId, thread);
+        const foreign = ThreadId.make("other-timeline-source");
+        yield* insertThread(other.projectId, foreign);
+        for (let index = 0; index < 90; index++) {
+          yield* service.createTarget({
+            projectId,
+            title: `Target ${index}`,
+            description: "",
+            constraints: [],
+            indicators: [],
+            status: "active",
+          });
+        }
+        yield* sql`INSERT INTO orchestration_v2_projection_runs(run_id,thread_id,ordinal,provider,status,requested_at,payload_json)
+          VALUES('waiting-turn',${thread},1,'codex','running','2026-11-05T08:00:00.000Z','{}')`;
+        yield* sql`INSERT INTO orchestration_v2_projection_runtime_requests(runtime_request_id,thread_id,node_id,kind,status,created_at,payload_json)
+      VALUES ('need',${thread},'node','user_input','pending','2026-11-05T09:00:00.000Z','{}')`;
+        const pending = yield* service.timeline({
+          projectId,
+          focus: { entityKind: "target", entityId: target.id },
+        });
+        assert.isTrue(pending.hasOlder);
+        assert.isFalse(pending.events.some((e) => e.threadId === thread && e.state === "running"));
+
+        assert.isTrue(pending.events.some((e) => e.entityId === target.id));
+        assert.isTrue(
+          pending.events.some((e) => e.threadId === thread && e.state === "needs-input"),
+        );
+        yield* sql`UPDATE orchestration_v2_projection_runtime_requests SET status='resolved' WHERE runtime_request_id='need'`;
+        const cleared = yield* service.timeline({
+          projectId,
+          focus: { entityKind: "thread", entityId: foreign },
+        });
+        assert.isFalse(
+          cleared.events.some((e) => e.state === "needs-input" || e.threadId === foreign),
+        );
+        const first = yield* service.timelineHistory({ projectId });
+        assert.deepEqual(cleared.nextCursor, first.nextCursor);
+        assert.isTrue(cleared.events.some((e) => e.threadId === thread && e.state === "running"));
+        const second = yield* service.timelineHistory({ projectId, before: first.nextCursor! });
+        const third = yield* service.timelineHistory({ projectId, before: second.nextCursor! });
+        assert.equal(first.events.length, 40);
+        assert.isFalse(
+          second.events.some((past) => cleared.events.some((recent) => recent.id === past.id)),
+        );
+        assert.isNull(third.nextCursor);
+        const ids = [...first.events, ...second.events, ...third.events].map((e) => e.id);
+        assert.equal(new Set(ids).size, 92);
+        assert.equal(ids.length, 92);
+      }),
+  );
+  it.effect("retains both settled occurrences around a manual reopen", () =>
+    Effect.gen(function* () {
+      const { projectId, service } = yield* fixture("reopen");
+      const sql = yield* SqlClient.SqlClient;
+      const thread = ThreadId.make("repeated-settle");
+      yield* insertThread(projectId, thread);
+      yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json='{"settledAt":"2026-11-05T01:00:00Z","settledOverride":"settled"}' WHERE thread_id=${thread}`;
+      yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json='{"unsettledAt":"2026-11-05T02:00:00Z","settledOverride":"active"}' WHERE thread_id=${thread}`;
+      yield* sql`UPDATE orchestration_v2_projection_threads SET payload_json='{"settledAt":"2026-11-05T03:00:00Z","settledOverride":"settled"}' WHERE thread_id=${thread}`;
+      const history = yield* service.timelineHistory({ projectId });
+      const settled = history.events.filter((e) => e.action === "Thread settled");
+      assert.equal(settled.length, 2);
+      assert.notEqual(settled[0]!.id, settled[1]!.id);
+      assert.isTrue(history.events.some((e) => e.action === "Thread reopened"));
+      const current = yield* service.timeline({ projectId });
+      assert.isTrue(current.events.some((e) => e.id === settled[1]!.id));
+    }),
+  );
+  it.effect(
+    "opens the recorded journal revision and its supplied source even after a later reanalysis",
+    () =>
+      Effect.gen(function* () {
+        const { projectId, service } = yield* fixture("timeline-journals");
+        const sql = yield* SqlClient.SqlClient;
+        const source = ThreadId.make("journal-source");
+        yield* insertThread(projectId, source);
+        const at = "2026-11-05T09:00:00.000Z";
+        const model =
+          '{"instanceId":"codex","model":"luna","options":[{"id":"reasoningEffort","value":"xhigh"}]}';
+        const entries =
+          '[{"title":"Choice","body":"Keep the original decision.","kind":"decision","scope":"project","branch":null,"sourceRefs":[{"threadId":"journal-source","runId":"source-run"}],"contradictsEntryIds":[]}]';
+        yield* sql`INSERT INTO monarch_run_journals(project_id,run_id,thread_id,completed_at,entries_json,review_run_id,model_json,started_at,recorded_at)
+      VALUES(${projectId},'source-run',${source},${at},${entries},'first-review',${model},${at},${at})`;
+        yield* sql`UPDATE monarch_run_journals SET revision=2,entries_json='[]' WHERE project_id=${projectId}`;
+        yield* sql`INSERT INTO monarch_review_stages(project_id,review_run_id,stage,source_run_ids_json,source_refs_json,model_json,started_at,completed_at,status)
+      VALUES(${projectId},'review','suggestions','["source-run"]','[{"runId":"source-run","revision":1}]',${model},${at},${at},'succeeded')`;
+        const input = {
+          projectId,
+          focus: {
+            entityKind: "journal" as const,
+            entityId: "source-run",
+            eventId: "journal:source-run:1",
+          },
+        };
+        const timeline = yield* service.timeline(input);
+        const old = timeline.events.find((e) => e.id === input.focus.eventId)!;
+        assert.include(old.detail, "Keep the original decision.");
+        assert.include(old.detail, "xhigh");
+        assert.equal(old.threadId, source);
+        const stage = timeline.events.find((e) => e.id === "stage:review:suggestions")!;
+        assert.include(stage.parentIds, old.id);
+        assert.notInclude(stage.parentIds, "journal:source-run:2");
+        yield* sql`INSERT INTO monarch_project_context(project_id,settings_json) VALUES(${projectId},'{"excludedThreadIds":["journal-source"]}')`;
+        assert.notEqual(
+          (yield* service.timelineHistory({ projectId })).visibilityKey,
+          timeline.visibilityKey,
+        );
+
+        assert.isFalse(
+          (yield* service.timeline(input)).events.some(
+            (e) => e.entityKind === "journal" || e.parentIds.includes(old.id),
+          ),
+        );
+        assert.isFalse(
+          (yield* service.timelineHistory({ projectId })).events.some(
+            (e) => e.entityKind === "journal",
+          ),
+        );
+      }),
+  );
   it.effect("rejects cross-project item, target and thread references and deleted projects", () =>
     Effect.gen(function* () {
       const first = yield* fixture("scope-a");
@@ -320,12 +462,23 @@ it.layer(testLayer)("Monarch planning", (it) => {
         Stream.runCollect,
         Effect.forkChild,
       );
+      const timelineReady = yield* Deferred.make<void>();
+      const timelineFiber = yield* service.watchTimeline({ projectId }).pipe(
+        Stream.tap(() => Deferred.succeed(timelineReady, undefined)),
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.forkChild,
+      );
+      yield* Deferred.await(timelineReady);
       yield* Deferred.await(initialRead);
       const revised = yield* service.updateTarget({
         ...target,
         expectedRevision: target.revision,
         status: "paused",
       });
+      yield* TestClock.adjust("3 seconds");
+      const timelineSnapshots = yield* Fiber.join(timelineFiber);
+      assert.isTrue(timelineSnapshots[1]!.events.some((e) => e.action === "Target paused"));
       const snapshots = yield* Fiber.join(fiber);
       assert.strictEqual(snapshots.length, 2);
       assert.deepStrictEqual(snapshots[0]?.targets, [target]);

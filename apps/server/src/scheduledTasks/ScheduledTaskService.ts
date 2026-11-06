@@ -1002,6 +1002,10 @@ export const layer = Layer.effect(
               if (counted.length > 0) written = yield* completion;
             }
           }
+          if (written && threadId !== null) {
+            yield* sql`UPDATE monarch_prompt_runs SET thread_id=${threadId},created_thread=${active.threadId === null ? 1 : 0}
+              WHERE project_id=${active.projectId} AND task_id=${active.id} AND started_at=${startedAtIso}`;
+          }
           // A row recreated mid-run is not this run's, so report what is stored.
           return { recorded: written ? completed : current, written };
         });

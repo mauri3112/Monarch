@@ -88,6 +88,9 @@ import Migration0081 from "./Migrations/081_MonarchReviewSchedules.ts";
 import Migration0082 from "./Migrations/082_MonarchReviewScheduleRemoval.ts";
 import Migration0083 from "./Migrations/083_MonarchProjectContext.ts";
 import Migration0084 from "./Migrations/084_MonarchContinuityQueue.ts";
+import Migration0085 from "./Migrations/085_MonarchRunJournals.ts";
+import Migration0086 from "./Migrations/086_MonarchTimeline.ts";
+import Migration0087 from "./Migrations/087_MonarchTimelineHistory.ts";
 
 const migrationEntries = [
   [1, "OrchestrationEvents", Migration0001],
@@ -175,6 +178,9 @@ const migrationEntries = [
   [82, "MonarchReviewScheduleRemoval", Migration0082],
   [83, "MonarchProjectContext", Migration0083],
   [84, "MonarchContinuityQueue", Migration0084],
+  [85, "MonarchRunJournals", Migration0085],
+  [86, "MonarchTimeline", Migration0086],
+  [87, "MonarchTimelineHistory", Migration0087],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

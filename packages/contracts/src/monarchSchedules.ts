@@ -87,6 +87,9 @@ export const MonarchScheduleRun = Schema.Struct({
   suggestionIds: Schema.Array(Schema.String),
   contextRevision: Schema.optionalKey(Schema.Int),
   contextEntryIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  reviewScopeRunId: Schema.optionalKey(RunId),
+  retryOfRunId: Schema.optionalKey(Schema.String),
+  journalRevision: Schema.optionalKey(Schema.Int),
   sourceRunIds: Schema.optionalKey(Schema.Array(RunId)),
   requestVersion: Schema.optionalKey(Schema.Int),
   updateContext: Schema.optionalKey(Schema.Boolean),
@@ -164,6 +167,7 @@ export const MonarchSchedulesHistoryResult = Schema.Struct({
 export const MonarchProjectRefreshInput = Schema.Struct({
   projectId: ProjectId,
   mode: Schema.Literals(["build-context", "refresh", "retry"]),
+  reanalyze: Schema.optionalKey(Schema.Boolean),
   threadIds: Schema.optionalKey(
     Schema.Array(ThreadId).check(Schema.isMinLength(1), Schema.isMaxLength(20)),
   ),

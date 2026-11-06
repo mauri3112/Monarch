@@ -94,21 +94,36 @@ const projectRef = scopeProjectRef(
   ProjectId.make("project-1"),
 );
 
-it("requires a saved review model before building project context", async () => {
+it("can journal a selected turn independently of the suggestion model and requests re-analysis only explicitly", async () => {
   mocks.command.mockClear();
   await using _screen = await render(
     <ProjectContextPanel
       projectRef={projectRef}
       projectTitle="Test project"
+      presentation="docked"
       archived={false}
       open
       onClose={() => {}}
     />,
     { router: "/workspace/environment-1/project-1" },
   );
-  const dialog = page.getByRole("dialog");
-  await expect.element(dialog.getByRole("button", { name: "Build context" })).toBeDisabled();
-  expect(mocks.command.mock.calls.some(([name]) => name === "refresh")).toBe(false);
+  const build = page.getByRole("button", { name: "Build context" });
+  await build.click();
+  expect(mocks.command).toHaveBeenCalledWith("refresh", {
+    environmentId: projectRef.environmentId,
+    input: { projectId: projectRef.projectId, mode: "build-context", threadIds: ["thread-1"] },
+  });
+  await page.getByRole("checkbox", { name: /Re-analyze selected turns/ }).click();
+  await build.click();
+  expect(mocks.command).toHaveBeenCalledWith("refresh", {
+    environmentId: projectRef.environmentId,
+    input: {
+      projectId: projectRef.projectId,
+      mode: "build-context",
+      threadIds: ["thread-1"],
+      reanalyze: true,
+    },
+  });
 });
 
 it("loads the latest completed source when the context panel reopens", async () => {
