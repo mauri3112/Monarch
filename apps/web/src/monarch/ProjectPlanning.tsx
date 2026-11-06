@@ -274,6 +274,37 @@ export function ProjectPlanning({
     (selectedSuggestion?.contextRevision !== undefined &&
       selectedSuggestion.contextRevision !== contextQuery.data?.revision);
 
+  const selectedSuggestionCauses: string[] = [];
+  for (const ref of selectedSuggestion?.targets ?? []) {
+    const currentTarget = query.data?.targets.find((target) => target.id === ref.targetId);
+    if (!currentTarget) {
+      if (!selectedSuggestionCauses.includes("A referenced Target is unavailable."))
+        selectedSuggestionCauses.push("A referenced Target is unavailable.");
+    } else if (currentTarget.status === "archived") {
+      selectedSuggestionCauses.push(`Target “${currentTarget.title}” is archived.`);
+    } else if (currentTarget.revision !== ref.revision)
+      selectedSuggestionCauses.push(
+        `Target “${currentTarget.title}” changed from revision ${ref.revision} to ${currentTarget.revision}.`,
+      );
+  }
+  if (
+    selectedSuggestion?.contextRevision !== undefined &&
+    selectedSuggestion.contextRevision !== contextQuery.data?.revision
+  ) {
+    selectedSuggestionCauses.push(
+      contextQuery.data
+        ? `Project context changed from revision ${selectedSuggestion.contextRevision} to ${contextQuery.data.revision}.`
+        : "Current project context is still loading.",
+    );
+  }
+  if (
+    selectedSuggestion?.sourceThreadIds.some((id) =>
+      contextQuery.data?.settings.excludedThreadIds.includes(id),
+    )
+  ) {
+    selectedSuggestionCauses.push("A source thread is now excluded from project reviews.");
+  }
+
   async function changeTargetStatus(item: MonarchTarget, status: MonarchTargetStatus) {
     setBusyId(item.id);
     const result = await updateTarget({
@@ -323,6 +354,31 @@ export function ProjectPlanning({
                   >
                     {selectedTarget.status === "archived" ? "Restore Target" : "Archive Target"}
                   </Button>
+                  <div
+                    className="mt-2 max-h-36 w-full overflow-y-auto border-t border-border pt-2 text-xs leading-relaxed"
+                    aria-label="Current Target material"
+                  >
+                    <p className="text-2xs text-muted-foreground">
+                      Current saved Target · Revision {selectedTarget.revision} ·{" "}
+                      {STATUS_LABEL[selectedTarget.status]}
+                    </p>
+                    <h4 className="mt-1 font-medium">{selectedTarget.title}</h4>
+                    {selectedTarget.description ? (
+                      <p className="mt-1 whitespace-pre-wrap break-words">
+                        {selectedTarget.description}
+                      </p>
+                    ) : null}
+                    {selectedTarget.indicators.length ? (
+                      <p className="mt-1 text-muted-foreground">
+                        Signs of progress · {selectedTarget.indicators.join(" · ")}
+                      </p>
+                    ) : null}
+                    {selectedTarget.constraints.length ? (
+                      <p className="mt-1 text-muted-foreground">
+                        Constraints · {selectedTarget.constraints.join(" · ")}
+                      </p>
+                    ) : null}
+                  </div>
                 </>
               ) : null}
               {selectedSuggestion ? (
@@ -367,6 +423,39 @@ export function ProjectPlanning({
                       Restore suggestion
                     </Button>
                   ) : null}
+                  <div
+                    className="mt-2 max-h-36 w-full overflow-y-auto border-t border-border pt-2 text-xs leading-relaxed"
+                    aria-label="Current proposal material"
+                  >
+                    <p className="text-2xs text-muted-foreground">
+                      Current saved proposal · Revision {selectedSuggestion.revision} ·{" "}
+                      {selectedSuggestion.status}
+                    </p>
+                    <h4 className="mt-1 font-medium">{selectedSuggestion.title}</h4>
+                    {selectedSuggestion.rationale ? (
+                      <p className="mt-1 whitespace-pre-wrap break-words">
+                        {selectedSuggestion.rationale}
+                      </p>
+                    ) : null}
+                    {selectedSuggestionCauses.length ? (
+                      <div
+                        className="mt-2 space-y-1 text-warning-foreground"
+                        aria-label="Proposal review reasons"
+                      >
+                        {selectedSuggestionCauses.map((cause) => (
+                          <p key={cause}>{cause}</p>
+                        ))}
+                      </div>
+                    ) : null}
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-muted-foreground">
+                        Current prompt
+                      </summary>
+                      <p className="mt-1 whitespace-pre-wrap break-words">
+                        {selectedSuggestion.prompt}
+                      </p>
+                    </details>
+                  </div>
                 </>
               ) : null}
             </>,

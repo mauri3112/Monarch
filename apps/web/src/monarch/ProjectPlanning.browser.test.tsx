@@ -2,9 +2,11 @@ import { scopeProjectRef } from "@t3tools/client-runtime/environment";
 import { EnvironmentId, ProjectId } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
 import { userEvent } from "vite-plus/test/browser";
+import { useState } from "react";
 
 import { render } from "../../test/render";
 import { ProjectPlanning } from "./ProjectPlanning";
+import { MonarchDockContext, type TimelineSelection } from "./MonarchDockContext";
 
 const mocks = vi.hoisted(() => ({
   canEdit: true,
@@ -207,5 +209,65 @@ it("records a suggestion as used only after its reserved thread is persisted", a
   } finally {
     mocks.data.suggestions[0]!.draftThreadId = null;
     mocks.threadShells.length = 0;
+  }
+});
+
+function CurrentMaterialHarness({ selection }: { selection: TimelineSelection }) {
+  const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
+  return (
+    <MonarchDockContext
+      value={{
+        activeKind: "timeline",
+        selection,
+        actionHost,
+        host: null,
+        open: () => {},
+        close: () => {},
+        updateIncludedBranch: () => {},
+      }}
+    >
+      <ProjectPlanning projectRef={projectRef} projectTitle="Test project" archived={false} />
+      <div ref={setActionHost} aria-label="Timeline footer" />
+    </MonarchDockContext>
+  );
+}
+
+it("shows current owner rationale and stale causes while a historical event is selected", async () => {
+  mocks.canEdit = true;
+  mocks.data.targets[0]!.description = "Restore unsent drafts after a restart.";
+  try {
+    await using screen = await render(
+      <CurrentMaterialHarness
+        selection={{
+          entityKind: "suggestion",
+          entityId: "suggestion-1",
+          eventId: "suggestion-1-revision-1",
+        }}
+      />,
+      { router: "/workspace/environment-1/project-1" },
+    );
+    await expect
+      .element(screen.getByText("Current saved proposal · Revision 3 · suggested"))
+      .toBeVisible();
+    await expect.element(screen.getByText("Several threads changed persistence")).toBeVisible();
+    await expect
+      .element(screen.getByText("Target “Improve reliability” changed from revision 1 to 2."))
+      .toBeVisible();
+    await expect.element(screen.getByRole("button", { name: "Use", exact: true })).toBeDisabled();
+    await userEvent.click(screen.getByText("Current prompt", { exact: true }));
+    await expect
+      .element(screen.getByText("Test restore after restart", { exact: true }))
+      .toBeVisible();
+    await screen.rerender(
+      <CurrentMaterialHarness
+        selection={{ entityKind: "target", entityId: "target-1", eventId: "target-1-revision-1" }}
+      />,
+    );
+    await expect
+      .element(screen.getByText("Current saved Target · Revision 2 · Active"))
+      .toBeVisible();
+    await expect.element(screen.getByText("Restore unsent drafts after a restart.")).toBeVisible();
+  } finally {
+    mocks.data.targets[0]!.description = "";
   }
 });

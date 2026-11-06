@@ -116,6 +116,7 @@
   stroke: var(--timeline-rule);
   stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
+  stroke-linejoin: round;
 }
 
 .project-timeline-wires path[data-sent] {
@@ -132,12 +133,14 @@
 }
 
 .project-timeline-day {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 10px;
   min-height: 34px;
   color: var(--timeline-muted);
   font-size: 10px;
+  background: var(--timeline-paper);
 }
 
 .project-timeline-day::after {
@@ -511,16 +514,11 @@
 
 @container project-timeline (max-width: 500px) {
   .project-timeline-axis {
-    text-align: center;
     font-size: 10px;
   }
 
   .project-timeline-event {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 9px;
-    text-align: center;
+    gap: 5px;
     padding-bottom: 18px;
   }
 

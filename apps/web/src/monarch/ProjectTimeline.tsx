@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import { observeResize } from "../lib/observeResize";
+import { timelineConnectionPoints, type TimelineMarkerPoint } from "./projectTimelineGeometry";
 import styles from "./ProjectTimeline.module.css";
 
 function timelineEntityKey(event: Pick<MonarchTimelineEvent, "entityKind" | "entityId">) {
@@ -90,7 +91,6 @@ function inlineTransition(event: MonarchTimelineEvent) {
   return event.action;
 }
 
-type MarkerPoint = { x: number; y: number };
 type Connection = {
   id: string;
   path: string;
@@ -99,11 +99,10 @@ type Connection = {
   destinationId: string;
 };
 
-function connect(source: MarkerPoint, destination: MarkerPoint) {
-  const distance = Math.abs(destination.y - source.y);
-  const bend = Math.max(22, Math.min(distance * 0.48, 80));
-  const direction = destination.y >= source.y ? 1 : -1;
-  return `M ${source.x} ${source.y} C ${source.x} ${source.y + bend * direction}, ${destination.x} ${destination.y - bend * direction}, ${destination.x} ${destination.y}`;
+function connect(source: TimelineMarkerPoint, destination: TimelineMarkerPoint) {
+  return timelineConnectionPoints(source, destination)
+    .map((point, index) => `${index === 0 ? "M" : "L"} ${point.x} ${point.y}`)
+    .join(" ");
 }
 
 export interface ProjectTimelineProps {
@@ -206,12 +205,15 @@ export function ProjectTimeline({
     if (!graph) return;
     const measure = () => {
       const bounds = graph.getBoundingClientRect();
-      const positions = new Map<string, MarkerPoint>();
+      const positions = new Map<string, TimelineMarkerPoint>();
       for (const [id, marker] of markers.current) {
         const rect = marker.getBoundingClientRect();
+        const row = marker.closest("[data-timeline-row]")?.getBoundingClientRect();
+        if (!row) continue;
         positions.set(id, {
           x: rect.left + rect.width / 2 - bounds.left,
           y: rect.top + rect.height / 2 - bounds.top,
+          rowTop: row.top - bounds.top,
         });
       }
       const eventsById = new Map(timeline.events.map((event) => [event.id, event]));
@@ -382,12 +384,17 @@ export function ProjectTimeline({
             const isSelected = event.id === selectedId;
             const isLinked = owner === selectedOwner || owner === hoveredOwner;
             const caption = STATE_LABEL[event.state];
+            const transition = inlineTransition(event);
             return (
               <div key={event.id}>
                 {!previous || eventDay(previous) !== day ? (
                   <div className={styles["project-timeline-day"]}>{day}</div>
                 ) : null}
-                <div className={styles["project-timeline-row"]} data-lane={lane(event)}>
+                <div
+                  className={styles["project-timeline-row"]}
+                  data-lane={lane(event)}
+                  data-timeline-row
+                >
                   <time
                     dateTime={event.at ?? undefined}
                     className={styles["project-timeline-time"]}
@@ -436,9 +443,9 @@ export function ProjectTimeline({
                     </span>
                     <span className={styles["project-timeline-label"]}>
                       <span className={styles["project-timeline-title"]}>{event.title}</span>
-                      <span className={styles["project-timeline-action"]}>
-                        {inlineTransition(event)}
-                      </span>
+                      {transition.trim().toLowerCase() !== event.title.trim().toLowerCase() ? (
+                        <span className={styles["project-timeline-action"]}>{transition}</span>
+                      ) : null}
                       <span className={styles["project-timeline-subtitle"]}>
                         {event.detail.length > 240
                           ? `${event.detail.slice(0, 240).trimEnd()}…`
@@ -470,9 +477,11 @@ export function ProjectTimeline({
                   {FAMILY_LABEL[selected.family]} · {STATE_LABEL[selected.state]}
                 </span>
                 <h3>{selected.title}</h3>
-                <span className={styles["project-timeline-selected-action"]}>
-                  {selected.action}
-                </span>
+                {selected.action.trim().toLowerCase() !== selected.title.trim().toLowerCase() ? (
+                  <span className={styles["project-timeline-selected-action"]}>
+                    {selected.action}
+                  </span>
+                ) : null}
               </div>
               <button
                 type="button"
