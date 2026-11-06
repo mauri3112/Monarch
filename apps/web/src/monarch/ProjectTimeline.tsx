@@ -12,11 +12,7 @@ import {
 } from "react";
 
 import { observeResize } from "../lib/observeResize";
-import {
-  timelineWires,
-  type TimelineWire,
-  type TimelineMarkerPoint,
-} from "./projectTimelineGeometry";
+import { timelineWires, type TimelineMarkerPoint } from "./projectTimelineGeometry";
 import styles from "./ProjectTimeline.module.css";
 
 function timelineEntityKey(event: Pick<MonarchTimelineEvent, "entityKind" | "entityId">) {
@@ -30,6 +26,49 @@ const FAMILY_LABEL = {
   schedule: "Scheduled task",
   model: "Background action",
 } as const;
+
+const SYMBOLS = {
+  target: <path d="m12 2.5 9.5 9.5-9.5 9.5L2.5 12Z" />,
+  thread: <circle cx="12" cy="12" r="8.5" />,
+  suggestion: (
+    <path d="M12 2c1.6 5.6 4.4 8.4 10 10-5.6 1.6-8.4 4.4-10 10C10.4 16.4 7.6 13.6 2 12c5.6-1.6 8.4-4.4 10-10Z" />
+  ),
+  schedule: <rect x="3.5" y="3.5" width="17" height="17" rx="2" />,
+  model: <path d="m12 3 9 17H3Z" />,
+} satisfies Record<MonarchTimelineEvent["family"], ReactNode>;
+
+function TimelineSymbol({
+  family,
+  state,
+}: Pick<MonarchTimelineEvent, "family"> & { state?: MonarchTimelineEvent["state"] }) {
+  return (
+    <svg
+      className={styles["project-timeline-symbol"]}
+      viewBox="0 0 24 24"
+      fill="var(--timeline-symbol-fill, currentColor)"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      {SYMBOLS[family]}
+      {state === "needs-input" && (
+        <g stroke="var(--timeline-paper)" fill="none" strokeLinecap="round">
+          <path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4" />
+          <circle cx="12" cy="16" r=".9" fill="var(--timeline-paper)" stroke="none" />
+        </g>
+      )}
+      {(state === "archived" || state === "achieved") && (
+        <path
+          d="m8 12 2.7 2.7 5.3-5.5"
+          fill="none"
+          stroke={state === "archived" ? "currentColor" : "var(--timeline-paper)"}
+          strokeLinecap="round"
+        />
+      )}
+    </svg>
+  );
+}
 
 const STATE_LABEL = {
   recorded: "Recorded",
@@ -81,6 +120,26 @@ function lane(event: MonarchTimelineEvent) {
   return event.family === "thread" ? "work" : event.family === "target" ? "project" : "actions";
 }
 
+// A narrow graph can bundle several lines. Keep each recorded relationship available by name.
+function connectedActivity(events: readonly MonarchTimelineEvent[]) {
+  const byId = new Map(events.map((event) => [event.id, event]));
+  const names = new Map<string, Set<string>>();
+  function describe(id: string, other: MonarchTimelineEvent) {
+    const group = names.get(id) ?? new Set<string>();
+    group.add(`${FAMILY_LABEL[other.family].toLowerCase()} “${other.title}” (${other.action})`);
+    names.set(id, group);
+  }
+  for (const event of events) {
+    for (const id of new Set([...event.parentIds, ...(event.relatedEventIds ?? [])])) {
+      const other = byId.get(id);
+      if (!other || lane(other) === lane(event)) continue;
+      describe(event.id, other);
+      describe(other.id, event);
+    }
+  }
+  return names;
+}
+
 function inlineTransition(event: MonarchTimelineEvent) {
   if (event.family === "target" && event.state !== "recorded") {
     return `${STATE_LABEL[event.state]} target`;
@@ -122,10 +181,16 @@ export function ProjectTimeline({
   const [localHover, setLocalHover] = useState<string | null>(null);
   const [zoom, setZoom] = useState(1);
   const [visible, setVisible] = useState(true);
-  const [geometry, setGeometry] = useState({ width: 0, height: 0, paths: [] as TimelineWire[] });
+  const [geometry, setGeometry] = useState({
+    width: 0,
+    height: 0,
+    projectRailX: 0,
+    pins: new Map<string, TimelineMarkerPoint>(),
+  });
   const graphRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const axisRef = useRef<HTMLDivElement>(null);
+  const projectRailRef = useRef<HTMLSpanElement>(null);
   const rootRef = useRef<HTMLElement>(null);
   const markers = useRef(new Map<string, HTMLSpanElement>());
   const initiallyPositioned = useRef(false);
@@ -147,6 +212,18 @@ export function ProjectTimeline({
     timeline.events[0];
   const currentEventId = currentEvent?.id;
   const keyboardAnchorId = selectedEventId ?? currentEventId;
+  const wires = timelineWires(timeline.events, geometry.pins, {
+    selectedId: selectedEventId ?? null,
+    projectRailX: geometry.projectRailX,
+  });
+  const traced = new Set(
+    wires
+      .filter((wire) =>
+        wire.relations.some(({ from, to }) => from === selectedId || to === selectedId),
+      )
+      .map((wire) => wire.key),
+  );
+  const connections = connectedActivity(timeline.events);
 
   function select(event: MonarchTimelineEvent | null) {
     setLocalSelected(event?.id ?? null);
@@ -195,7 +272,10 @@ export function ProjectTimeline({
   useLayoutEffect(() => {
     const graph = graphRef.current;
     if (!graph) return;
-    const rows = Array.from(graph.querySelectorAll<HTMLElement>("[data-timeline-row]"));
+    const rows = timeline.events.flatMap((event) => {
+      const row = markers.current.get(event.id)?.closest<HTMLElement>("[data-timeline-row]");
+      return row ? [row] : [];
+    });
     const measure = () => {
       const bounds = graph.getBoundingClientRect();
       const positions = new Map<string, TimelineMarkerPoint>();
@@ -215,10 +295,12 @@ export function ProjectTimeline({
           railGap,
         });
       }
+      const projectRail = projectRailRef.current?.getBoundingClientRect();
       setGeometry({
         width: bounds.width,
         height: bounds.height,
-        paths: timelineWires(timeline.events, positions),
+        projectRailX: projectRail ? projectRail.left + projectRail.width / 2 - bounds.left : 0,
+        pins: positions,
       });
     };
     measure();
@@ -268,15 +350,6 @@ export function ProjectTimeline({
       document.removeEventListener("visibilitychange", update);
     };
   }, []);
-
-  const highlightedIds = new Set(
-    timeline.events
-      .filter((event) => {
-        const owner = timelineEntityKey(event);
-        return owner === selectedOwner || owner === hoveredOwner;
-      })
-      .map((event) => event.id),
-  );
 
   return (
     <section
@@ -343,7 +416,7 @@ export function ProjectTimeline({
         <div className={styles["project-timeline-canvas"]} ref={graphRef} data-timeline-canvas>
           {timeline.events.length > 0 && (
             <div className={styles["project-timeline-spines"]} aria-hidden="true">
-              <span data-timeline-spine="project" />
+              <span ref={projectRailRef} data-timeline-spine="project" />
               <span data-timeline-spine="work" />
             </div>
           )}
@@ -353,29 +426,20 @@ export function ProjectTimeline({
               viewBox={`0 0 ${geometry.width} ${geometry.height}`}
               preserveAspectRatio="none"
               aria-hidden="true"
+              data-tracing={traced.size > 0 || undefined}
             >
-              {geometry.paths
-                .filter((connection) =>
-                  connection.kind === "revision"
-                    ? highlightedIds.has(connection.from) || highlightedIds.has(connection.to)
-                    : connection.kind !== "source" ||
-                      connection.from === selectedId ||
-                      connection.to === selectedId,
-                )
-                .map((connection) => (
-                  <path
-                    key={`${connection.kind}:${connection.from}:${connection.to}`}
-                    d={connection.path}
-                    data-connection={connection.kind}
-                    data-source-event={connection.from}
-                    data-destination-event={connection.to}
-                    data-highlighted={
-                      highlightedIds.has(connection.from) ||
-                      highlightedIds.has(connection.to) ||
-                      undefined
-                    }
-                  />
-                ))}
+              {wires.map((wire) => (
+                <path
+                  key={wire.key}
+                  d={wire.path}
+                  strokeDashoffset={wire.dashOffset}
+                  data-connection={wire.kind}
+                  data-aggregate={wire.aggregate}
+                  data-source-event={wire.from}
+                  data-destination-event={wire.to}
+                  data-highlighted={traced.has(wire.key) || undefined}
+                />
+              ))}
             </svg>
           ) : null}
           {timeline.events.length === 0 ? (
@@ -392,6 +456,13 @@ export function ProjectTimeline({
             const isLinked = owner === selectedOwner || owner === hoveredOwner;
             const caption = STATE_LABEL[event.state];
             const transition = inlineTransition(event);
+            const related = connections.get(event.id);
+            const description = [
+              event.projectScope && "Project-wide action.",
+              related?.size && `Connected to ${[...related].join(", ")}.`,
+            ]
+              .filter(Boolean)
+              .join(" ");
             return (
               <div key={event.id}>
                 {!previous || eventDay(previous) !== day ? (
@@ -427,6 +498,7 @@ export function ProjectTimeline({
                     tabIndex={event.id === keyboardAnchorId ? 0 : -1}
                     aria-pressed={isSelected}
                     aria-label={`${FAMILY_LABEL[event.family]}: ${event.title}. ${event.action}. ${caption}${date ? `. ${fullDateFormatter.format(date)}` : ""}`}
+                    aria-description={description || undefined}
                     aria-controls={isSelected && showDetails ? headingId : undefined}
                     onClick={() => {
                       select(event);
@@ -447,12 +519,7 @@ export function ProjectTimeline({
                       }}
                       aria-hidden="true"
                     >
-                      <span className={styles["project-timeline-ink"]} />
-                      {event.state === "needs-input" ? (
-                        <span className={styles["project-timeline-glyph"]}>?</span>
-                      ) : event.state === "archived" || event.state === "achieved" ? (
-                        <span className={styles["project-timeline-glyph"]}>✓</span>
-                      ) : null}
+                      <TimelineSymbol family={event.family} state={event.state} />
                     </span>
                     <span className={styles["project-timeline-label"]}>
                       <span className={styles["project-timeline-title"]}>{event.title}</span>
@@ -463,6 +530,11 @@ export function ProjectTimeline({
                         {event.detail.length > 240
                           ? `${event.detail.slice(0, 240).trimEnd()}…`
                           : event.detail}
+                        {description && (
+                          <span className={styles["project-timeline-related-note"]}>
+                            {description}
+                          </span>
+                        )}
                       </span>
                     </span>
                   </button>
@@ -473,13 +545,16 @@ export function ProjectTimeline({
         </div>
       </div>
       <div className={styles["project-timeline-legend"]} aria-label="Timeline symbols">
-        {Object.entries(FAMILY_LABEL).map(([family, label]) => (
+        {(Object.keys(FAMILY_LABEL) as (keyof typeof FAMILY_LABEL)[]).map((family) => (
           <span key={family} data-family={family}>
-            <i className={styles["project-timeline-legend-mark"]} aria-hidden="true" />
-            {label}
+            <TimelineSymbol family={family} />
+            {FAMILY_LABEL[family]}
           </span>
         ))}
-        <span className={styles["project-timeline-return-key"]}>Dotted path: sent to thread</span>
+        <span className={styles["project-timeline-link-key"]}>Related activity</span>
+        <span className={styles["project-timeline-link-key"]} data-link="sent">
+          Sent to thread
+        </span>
       </div>
       {showDetails ? (
         <div className={styles["project-timeline-details"]} id={headingId}>

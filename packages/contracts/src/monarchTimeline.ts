@@ -85,6 +85,9 @@ export const MonarchTimelineEvent = Schema.Struct({
   ]),
   journalRefs: Schema.optionalKey(Schema.Array(MonarchJournalRef)),
   modelStage: Schema.optionalKey(Schema.Literals(["journal", "suggestions"])),
+  // Related Project/Work events are references, while parentIds record causation.
+  relatedEventIds: Schema.optionalKey(Schema.Array(Schema.String)),
+  projectScope: Schema.optionalKey(Schema.Boolean),
   parentIds: Schema.Array(Schema.String),
   threadId: Schema.NullOr(ThreadId),
   runId: Schema.NullOr(Schema.String),

@@ -7,10 +7,11 @@
   --timeline-rule: var(--border);
   --timeline-paper: var(--background);
   --timeline-rail: color-mix(in srgb, var(--foreground) 48%, var(--timeline-paper));
-  --timeline-branch: color-mix(in srgb, var(--timeline-suggestion) 78%, var(--timeline-paper));
+  --timeline-link: color-mix(in srgb, var(--foreground) 51%, var(--timeline-paper));
+  --timeline-step: color-mix(in srgb, var(--timeline-muted) 65%, var(--timeline-paper));
   --timeline-muted: var(--muted-foreground);
   --timeline-grid: 55px repeat(3, minmax(0, 1fr));
-  --timeline-gap: 11px;
+  --timeline-gap: 22px;
   --timeline-pad-start: 10px;
   --timeline-pad-end: 12px;
   --timeline-pin: 22px;
@@ -159,30 +160,34 @@
 
 .project-timeline-wires path {
   fill: none;
-  stroke: var(--timeline-branch);
-  stroke-width: 1.75;
+  stroke: var(--timeline-step);
+  stroke-width: 1.5;
   vector-effect: non-scaling-stroke;
   stroke-linejoin: round;
   stroke-linecap: round;
 }
 
-.project-timeline-wires path[data-connection="sent"] {
+.project-timeline-wires
+  :is([data-connection="source"], [data-connection="scope"], [data-connection="sent"]) {
+  stroke: var(--timeline-link);
+  stroke-width: 1.8;
+  stroke-dasharray: 0.25 5;
+}
+
+.project-timeline-wires [data-highlighted] {
+  stroke: color-mix(in srgb, var(--foreground) 72%, var(--timeline-paper));
+}
+
+.project-timeline-wires[data-tracing] path:not([data-highlighted]) {
+  opacity: 0.65;
+}
+
+.project-timeline-wires [data-connection="sent"] {
   stroke: var(--timeline-suggestion);
-  stroke-dasharray: 1 5;
-  stroke-width: 2;
 }
 
-.project-timeline-wires path[data-highlighted] {
-  stroke-width: 2;
-  stroke: var(--timeline-suggestion);
-}
-
-.project-timeline-wires path[data-connection="source"] {
-  stroke: var(--timeline-rail);
-}
-
-.project-timeline-wires path[data-connection="causal"] {
-  stroke: var(--timeline-model);
+.project-timeline-wires [data-connection="focus"] {
+  stroke: var(--timeline-muted);
 }
 
 .project-timeline-day {
@@ -281,41 +286,14 @@
   border-radius: 50%;
 }
 
-.project-timeline-ink {
-  width: 18px;
-  height: 18px;
-  border: 2px solid var(--timeline-color);
-  border-radius: 50%;
-  background: var(--timeline-color);
+.project-timeline-symbol {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: var(--timeline-color);
 }
 
-.project-timeline [data-family="target"] .project-timeline-ink {
-  width: 15px;
-  height: 15px;
-  border-radius: 2px;
-  transform: rotate(45deg);
-}
-
-.project-timeline [data-family="schedule"] .project-timeline-ink {
-  border-radius: 3px;
-}
-
-.project-timeline [data-family="model"] .project-timeline-ink {
-  border: 0;
-  border-radius: 0;
-  background: var(--timeline-color);
-  clip-path: polygon(50% 4%, 98% 94%, 2% 94%);
-}
-
-.project-timeline [data-family="suggestion"] .project-timeline-ink {
-  width: 20px;
-  height: 20px;
-  border: 0;
-  border-radius: 0;
-  clip-path: polygon(50% 0, 64% 35%, 100% 50%, 64% 65%, 50% 100%, 36% 65%, 0 50%, 36% 35%);
-}
-
-.project-timeline [data-family="thread"][data-state="ready"] .project-timeline-ink,
+.project-timeline [data-family="thread"][data-state="ready"],
 .project-timeline
   :is([data-family="target"], [data-family="thread"], [data-family="schedule"]):is(
     [data-state="draft"],
@@ -323,34 +301,12 @@
     [data-state="conditional"],
     [data-state="paused"],
     [data-state="archived"]
-  )
-  .project-timeline-ink {
-  background: var(--timeline-paper);
+  ) {
+  --timeline-symbol-fill: var(--timeline-paper);
 }
 
-.project-timeline [data-family="suggestion"][data-state="ready"] .project-timeline-ink {
-  background: var(--timeline-suggestion);
-}
-
-.project-timeline [data-state="archived"] .project-timeline-ink,
-.project-timeline [data-state="paused"] .project-timeline-ink {
-  opacity: 0.65;
-}
-
-.project-timeline-glyph {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  font-size: 12px;
-  line-height: 1;
-  font-weight: 750;
-  color: var(--timeline-paper);
-}
-
-.project-timeline [data-state="archived"] .project-timeline-glyph {
-  color: var(--timeline-color);
-  font-size: 10px;
+.project-timeline :is([data-state="archived"], [data-state="paused"]) .project-timeline-symbol {
+  opacity: 0.75;
 }
 
 .project-timeline [data-state="needs-input"] .project-timeline-marker {
@@ -364,27 +320,12 @@
   font-weight: 550;
 }
 
-.project-timeline [data-state="running"] .project-timeline-marker::before {
-  content: "";
-  position: absolute;
-  inset: -4px;
-  border: 1.5px solid transparent;
-  border-top-color: var(--timeline-color);
-  border-right-color: var(--timeline-color);
-  border-radius: 50%;
-  animation: project-timeline-working 1.5s linear infinite;
+.project-timeline [data-state="running"] .project-timeline-symbol {
+  animation: project-timeline-working 1.7s ease-in-out infinite;
 }
 
-.project-timeline[data-motion="paused"] .project-timeline-marker::before {
+.project-timeline[data-motion="paused"] .project-timeline-symbol {
   animation-play-state: paused;
-}
-
-.project-timeline-event[data-selected] .project-timeline-marker::after {
-  content: "";
-  position: absolute;
-  inset: -4px;
-  border: 1.5px solid var(--timeline-color);
-  border-radius: 50%;
 }
 
 .project-timeline-label {
@@ -410,7 +351,14 @@
 }
 
 .project-timeline-event[data-linked] .project-timeline-title {
-  font-weight: 600;
+  font-weight: 550;
+}
+
+.project-timeline-event[data-selected] .project-timeline-title {
+  font-weight: 650;
+  text-decoration: underline solid var(--timeline-color);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
 }
 
 .project-timeline-action {
@@ -441,6 +389,13 @@
   display: block;
 }
 
+.project-timeline-related-note {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
 .project-timeline-legend {
   display: flex;
   flex: none;
@@ -460,37 +415,19 @@
   gap: 5px;
 }
 
-.project-timeline-legend-mark {
-  display: inline-block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--timeline-color);
+.project-timeline-legend .project-timeline-symbol {
+  width: 10px;
+  height: 10px;
 }
 
-.project-timeline-legend [data-family="target"] i {
-  border-radius: 1px;
-  transform: rotate(45deg);
-}
-
-.project-timeline-legend [data-family="schedule"] i {
-  border-radius: 1px;
-}
-
-.project-timeline-legend [data-family="model"] i {
-  border-radius: 0;
-  background: var(--timeline-model);
-  clip-path: polygon(50% 0, 100% 100%, 0 100%);
-}
-
-.project-timeline-legend [data-family="suggestion"] i {
-  clip-path: polygon(50% 0, 65% 35%, 100% 50%, 65% 65%, 50% 100%, 35% 65%, 0 50%, 35% 35%);
-}
-
-.project-timeline-return-key::before {
+.project-timeline-link-key::before {
   content: "";
-  width: 17px;
-  border-top: 2px dotted var(--timeline-suggestion);
+  width: 16px;
+  border-top: 2px dotted var(--timeline-link);
+}
+
+.project-timeline-link-key[data-link="sent"]::before {
+  border-color: var(--timeline-suggestion);
 }
 
 .project-timeline-details {
@@ -545,15 +482,15 @@
 }
 
 @keyframes project-timeline-working {
-  to {
-    transform: rotate(1turn);
+  50% {
+    opacity: 0.55;
   }
 }
 
 @container project-timeline (max-width: 500px) {
   .project-timeline-scroll {
     --timeline-grid: 43px repeat(3, minmax(0, 1fr));
-    --timeline-gap: 9px;
+    --timeline-gap: 18px;
   }
   .project-timeline-axis {
     font-size: 10px;
@@ -583,7 +520,7 @@
 
 @container project-timeline (max-width: 340px) {
   .project-timeline-scroll {
-    --timeline-gap: 7px;
+    --timeline-gap: 14px;
     --timeline-grid: 35px repeat(3, minmax(0, 1fr));
   }
 
@@ -593,7 +530,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .project-timeline [data-state="running"] .project-timeline-marker::before {
+  .project-timeline [data-state="running"] .project-timeline-symbol {
     animation: none;
   }
 }

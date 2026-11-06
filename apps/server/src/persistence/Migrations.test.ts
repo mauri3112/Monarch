@@ -151,6 +151,38 @@ describe("runMigrations", () => {
     }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
   );
 
+  it.effect("backfills only proven proposal and prompt creation origins from older databases", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      yield* runMigrations({ toMigrationInclusive: 85 });
+      const created = "2026-11-05T20:42:55.798Z";
+      const edited = "2026-11-05T21:12:31.417Z";
+      yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at)
+      VALUES('p','Project','/tmp/test','[]',${created},${created})`;
+      yield* sql`INSERT INTO monarch_suggestions(project_id,id,revision,payload_json) VALUES('p','old',2,
+      json_object('title','Proposal','status','suggested','createdAt',${created},'updatedAt',${edited},
+        'targets',json_array(json_object('targetId','known','revision',1))))`;
+      yield* runMigrations({ toMigrationInclusive: 88 });
+      yield* sql`UPDATE monarch_suggestions SET revision=3,payload_json=json_set(payload_json,'$.draftThreadId','reserved','$.updatedAt','2026-11-06T16:00:00Z') WHERE id='old'`;
+      yield* sql`INSERT INTO scheduled_tasks(task_id,title,prompt,enabled,schedule_json,project_id,thread_id,workspace_strategy_json,
+      model_selection_json,runtime_mode,interaction_mode,created_by,creation_source,created_at,updated_at,last_run_status,run_count)
+      VALUES ('pristine','Task','Go',1,'{}','p','work','{}','{}','approval-required','default','user','web',${created},${created},'never',0),
+      ('changed','Task','Go',1,'{}','p','work','{}','{}','approval-required','default','user','web',${created},${edited},'never',0)`;
+      yield* runMigrations();
+      assert.deepEqual(
+        yield* sql`SELECT event_id,json_extract(targets_json,'$[0].targetId') target FROM monarch_proposal_target_origins WHERE project_id='p'`,
+        [{ event_id: "suggestion:old:0000000002", target: "known" }],
+      );
+      assert.deepEqual(yield* sql`SELECT task_id,thread_id FROM monarch_prompt_creation_origins`, [
+        { task_id: "pristine", thread_id: "work" },
+      ]);
+      yield* sql`UPDATE monarch_suggestions SET revision=4,payload_json=json_set(payload_json,'$.revision',4,'$.targets',json_array(json_object('targetId','new','revision',1))) WHERE id='old'`;
+      assert.deepEqual(
+        yield* sql`SELECT json_extract(targets_json,'$[0].targetId') target FROM monarch_proposal_target_origins WHERE project_id='p' ORDER BY event_id`,
+        [{ target: "known" }, { target: "new" }],
+      );
+    }).pipe(Effect.provide(NodeSqliteClient.layer({ filename: ":memory:" }))),
+  );
   it.effect("still starts after a newer build recorded a later V2 migration", () =>
     Effect.gen(function* () {
       const sql = yield* SqlClient.SqlClient;

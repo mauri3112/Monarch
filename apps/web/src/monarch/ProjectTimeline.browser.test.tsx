@@ -86,6 +86,7 @@ it("keeps continuous project and work spines centered through dates, compact lay
       family: "model",
       title: "Project review",
       at: "2026-11-05T09:00:00.000Z",
+      projectScope: true,
     }),
     event({
       id: "journal-between",
@@ -103,6 +104,7 @@ it("keeps continuous project and work spines centered through dates, compact lay
       title: "Proposed follow-up",
       at: "2026-11-05T10:00:00.000Z",
       parentIds: ["review-before"],
+      relatedEventIds: ["target-before", "work-before"],
     }),
     event({
       id: "schedule-after",
@@ -169,27 +171,32 @@ it("keeps continuous project and work spines centered through dates, compact lay
         return box.left + box.width / 2;
       });
       expect(Math.max(...actionCenters) - Math.min(...actionCenters)).toBeLessThan(1);
-      const branch = screen.container.querySelector<SVGPathElement>(
-        '[data-source-event="review-before"][data-destination-event="proposal-between"]',
-      );
-      expect(branch).not.toBeNull();
-      const journal = screen.container.querySelector<HTMLElement>(
-        '[data-timeline-marker="journal-between"]',
+      const scope = screen.container.querySelector<SVGPathElement>(
+        '[data-connection="scope"][data-destination-event="review-before"]',
       )!;
-      const markerBounds = journal.getBoundingClientRect();
-      const transform = branch!.getScreenCTM()!;
-      for (let step = 0; step <= 50; step++) {
-        const point = branch!.getPointAtLength((branch!.getTotalLength() * step) / 50);
-        const rendered = new DOMPoint(point.x, point.y).matrixTransform(transform);
-        if (rendered.y > markerBounds.top && rendered.y < markerBounds.bottom) {
-          expect(rendered.x).toBeLessThan(markerBounds.left - 1);
-        }
-      }
+      const start = scope.getPointAtLength(0);
+      const end = scope.getPointAtLength(scope.getTotalLength());
+      const rail = screen.container
+        .querySelector('[data-timeline-spine="project"]')!
+        .getBoundingClientRect();
+      expect(Math.abs(bounds.left + start.x - rail.left - rail.width / 2)).toBeLessThan(1);
+      expect(Math.abs(bounds.left + end.x - actionCenters[0]!)).toBeLessThan(1);
+      expect(start.y).toBeCloseTo(end.y, 1);
+      expect(screen.container.querySelector('[data-connection="source"]')).not.toBeNull();
     });
   };
   await assertSpines();
+  const proposal = screen.getByRole("button", { name: /Proposed follow-up/ });
+  await expect.element(proposal).toHaveAccessibleDescription(/Project direction/);
+  await expect.element(proposal).toHaveAccessibleDescription(/Earlier work/);
+  expect(screen.container.querySelector('[data-connection="focus"]')).toBeNull();
+  await userEvent.click(proposal);
+  await vi.waitFor(() =>
+    expect(screen.container.querySelector('[data-connection="focus"]')).not.toBeNull(),
+  );
   const laterWork = screen.getByRole("button", { name: /Later work\. Thread started/ });
   await userEvent.click(laterWork);
+  expect(screen.container.querySelector('[data-connection="focus"]')).toBeNull();
   await screen.rerender(
     <div style={{ width: 360, height: 580 }}>
       <ProjectTimeline timeline={timeline} />

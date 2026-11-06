@@ -18,6 +18,16 @@ const journalTabTime = new Intl.DateTimeFormat(undefined, {
   minute: "2-digit",
 });
 
+const linkLabel = {
+  target: "Related target",
+  thread: "Related thread",
+  journal: "Source journal",
+  review: "Source review",
+  suggestion: "Source event",
+  "prompt-schedule": "Source event",
+  "review-schedule": "Source event",
+} satisfies Record<MonarchTimelineEvent["entityKind"], string>;
+
 export function ProjectActivityDock({
   projectRef,
   expanded,
@@ -239,34 +249,29 @@ export function ProjectActivityDock({
                   </Button>
                 );
               })}
-              {event.parentIds.map((parentId) => {
-                const parent = query.data?.events.find((item) => item.id === parentId);
-                return parent &&
+              {[...new Set([...event.parentIds, ...(event.relatedEventIds ?? [])])].map((id) => {
+                const linked = query.data?.events.find((item) => item.id === id);
+                return linked &&
                   !(
-                    parent.entityKind === "journal" &&
+                    linked.entityKind === "journal" &&
                     event.journalRefs?.some((ref) =>
-                      parent.journalRefs?.some(
+                      linked.journalRefs?.some(
                         (candidate) =>
                           candidate.runId === ref.runId && candidate.revision === ref.revision,
                       ),
                     )
                   ) ? (
                   <Button
-                    key={parentId}
+                    key={id}
                     size="xs"
                     variant="ghost-muted"
                     onClick={() => {
-                      choose(parent);
-                      open(parent);
+                      choose(linked);
+                      open(linked);
                     }}
                   >
-                    {parent.entityKind === "journal"
-                      ? "Source journal"
-                      : parent.family === "model"
-                        ? "Source review"
-                        : "Source event"}{" "}
-                    · {parent.title}
-                    {parent.at ? ` · ${new Date(parent.at).toLocaleString()}` : ""}
+                    {linkLabel[linked.entityKind]} · {linked.title}
+                    {linked.at ? ` · ${new Date(linked.at).toLocaleString()}` : ""}
                   </Button>
                 ) : null;
               })}

@@ -91,6 +91,7 @@ import Migration0084 from "./Migrations/084_MonarchContinuityQueue.ts";
 import Migration0085 from "./Migrations/085_MonarchRunJournals.ts";
 import Migration0086 from "./Migrations/086_MonarchTimeline.ts";
 import Migration0088 from "./Migrations/088_MonarchSuggestionReservation.ts";
+import Migration0089 from "./Migrations/089_MonarchActionOrigins.ts";
 import Migration0087 from "./Migrations/087_MonarchTimelineHistory.ts";
 
 const migrationEntries = [
@@ -183,6 +184,7 @@ const migrationEntries = [
   [86, "MonarchTimeline", Migration0086],
   [87, "MonarchTimelineHistory", Migration0087],
   [88, "MonarchSuggestionReservation", Migration0088],
+  [89, "MonarchActionOrigins", Migration0089],
 ] as const;
 
 export const migrationManifest = migrationEntries.map(([id, name]) => [id, name] as const);

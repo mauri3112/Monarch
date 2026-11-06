@@ -644,7 +644,7 @@ export const readJournal = Effect.fn("MonarchService.readJournal")(function* (
     },
   };
 });
-const withJournalRefs = Effect.fn("MonarchTimeline.withJournalRefs")(function* (
+const withRelationships = Effect.fn("MonarchTimeline.withRelationships")(function* (
   projectId: ProjectId,
   events: ReadonlyArray<Event>,
 ) {
@@ -658,27 +658,87 @@ const withJournalRefs = Effect.fn("MonarchTimeline.withJournalRefs")(function* (
       ),
     ),
   ];
+  const related = new Map<string, Map<string, string>>();
+  const projectRoots = new Set<string>();
+  const relate = (id: string, endpoint: string, at: string) => {
+    const group = related.get(id) ?? new Map<string, string>();
+    group.set(endpoint, at);
+    related.set(id, group);
+  };
+  const suggestions = [
+    ...new Set(events.filter((e) => e.entityKind === "suggestion").map((e) => e.entityId)),
+  ];
+  if (suggestions.length) {
+    const eventIds = events.filter((e) => e.entityKind === "suggestion").map((e) => e.id);
+    const targets = yield* sql<{
+      event: string;
+      target: string;
+      targetRevision: number;
+      at: string;
+    }>`
+      SELECT s.event_id event,t.entity_id target,t.revision targetRevision,t.at FROM monarch_proposal_target_origins s
+      CROSS JOIN json_each(s.targets_json) ref JOIN monarch_planning_events t ON t.project_id=s.project_id AND t.kind='target'
+        AND t.entity_id=json_extract(ref.value,'$.targetId') AND t.revision=json_extract(ref.value,'$.revision')
+      WHERE s.project_id=${projectId} AND s.event_id IN ${sql.in(eventIds)}`;
+    for (const row of targets)
+      relate(row.event, planEvent("target", row.target, row.targetRevision), row.at);
+    const threads = yield* sql<{ id: string; thread: string; at: string }>`
+      SELECT s.id,t.thread_id thread,t.created_at at FROM monarch_suggestions s CROSS JOIN json_each(s.payload_json,'$.sourceThreadIds') ref
+      JOIN orchestration_v2_projection_threads t ON t.thread_id=ref.value AND t.project_id=s.project_id AND t.deleted_at IS NULL
+      LEFT JOIN monarch_project_context c ON c.project_id=s.project_id
+      WHERE s.project_id=${projectId} AND s.id IN ${sql.in(suggestions)}
+        AND NOT EXISTS(SELECT 1 FROM json_each(c.settings_json,'$.excludedThreadIds') x WHERE x.value=t.thread_id)`;
+    for (const row of threads)
+      relate(planEvent("suggestion", row.id, 1), threadStart(row.thread), row.at);
+  }
   const refs = new Map<string, Map<string, MonarchJournalRef>>();
   if (reviews.length) {
-    const rows = yield* sql<{ review: string; stage: string; runId: RunId; revision: number }>`
-      WITH related(review,stage,runId,revision,thread) AS (
-        SELECT s.review_run_id,s.stage,j.run_id,j.revision,j.thread_id
+    const roots = yield* sql<{
+      id: string;
+    }>`SELECT r.id FROM monarch_review_runs r WHERE r.project_id=${projectId} AND r.id IN ${sql.in(reviews)}
+      AND json_extract(r.payload_json,'$.trigger') IN ('manual','refresh','scheduled')
+      AND json_array_length(r.payload_json,'$.sourceRunIds')=0 AND json_extract(r.payload_json,'$.reviewScopeRunId') IS NULL
+      AND NOT EXISTS(SELECT 1 FROM monarch_review_stages s WHERE s.review_run_id=r.id AND s.project_id=r.project_id
+        AND (json_array_length(s.source_run_ids_json)>0 OR json_array_length(s.source_refs_json)>0))`;
+    for (const root of roots) projectRoots.add(reviewEvent(root.id));
+    const inputs = yield* sql<{ owner: string; run: string; at: string }>`
+      WITH inputs(owner,run) AS (
+        SELECT 'review:' || r.id,ref.value FROM monarch_review_runs r CROSS JOIN json_each(r.payload_json,'$.sourceRunIds') ref
+          WHERE r.project_id=${projectId} AND r.id IN ${sql.in(reviews)}
+        UNION ALL
+        SELECT 'stage:' || s.review_run_id || ':journal',ref.value FROM monarch_review_stages s CROSS JOIN json_each(s.source_run_ids_json) ref
+          WHERE s.stage='journal' AND s.project_id=${projectId} AND s.review_run_id IN ${sql.in(reviews)}
+      ) SELECT inputs.owner,r.run_id run,r.completed_at at FROM inputs JOIN orchestration_v2_projection_runs r ON r.run_id=inputs.run
+      JOIN orchestration_v2_projection_threads t ON t.thread_id=r.thread_id AND t.project_id=${projectId} AND t.deleted_at IS NULL
+      LEFT JOIN monarch_project_context c ON c.project_id=t.project_id WHERE r.status='completed' AND r.completed_at IS NOT NULL
+        AND NOT EXISTS(SELECT 1 FROM json_each(c.settings_json,'$.excludedThreadIds') x WHERE x.value=t.thread_id)`;
+    for (const input of inputs) relate(input.owner, turnEvent(input.run), input.at);
+    const rows = yield* sql<{
+      review: string;
+      stage: string;
+      runId: RunId;
+      revision: number;
+      completed: string;
+    }>`
+      WITH related(review,stage,runId,revision,thread,completed) AS (
+        SELECT s.review_run_id,s.stage,j.run_id,j.revision,j.thread_id,j.completed_at
         FROM monarch_review_stages s CROSS JOIN json_each(s.source_run_ids_json) src
         CROSS JOIN monarch_run_journal_revisions j ON j.project_id=s.project_id AND j.run_id=src.value AND j.review_run_id=s.review_run_id
         WHERE s.project_id=${projectId} AND s.review_run_id IN ${sql.in(reviews)} AND s.stage='journal'
         UNION ALL
-        SELECT s.review_run_id,s.stage,j.run_id,j.revision,j.thread_id
+        SELECT s.review_run_id,s.stage,j.run_id,j.revision,j.thread_id,j.completed_at
         FROM monarch_review_stages s CROSS JOIN json_each(s.source_refs_json) src
         CROSS JOIN monarch_run_journal_revisions j ON j.project_id=s.project_id AND j.run_id=json_extract(src.value,'$.runId')
           AND j.revision=json_extract(src.value,'$.revision')
         WHERE s.project_id=${projectId} AND s.review_run_id IN ${sql.in(reviews)} AND s.stage='suggestions'
       )
-      SELECT r.review,r.stage,r.runId,r.revision FROM related r
+      SELECT r.review,r.stage,r.runId,r.revision,r.completed FROM related r
       JOIN orchestration_v2_projection_threads t ON t.project_id=${projectId} AND t.thread_id=r.thread AND t.deleted_at IS NULL
       LEFT JOIN monarch_project_context c ON c.project_id=t.project_id
       WHERE NOT EXISTS(SELECT 1 FROM json_each(c.settings_json,'$.excludedThreadIds') x WHERE x.value=r.thread)
       ORDER BY r.review,r.stage,r.runId,r.revision`;
-    for (const { review, stage, runId, revision } of rows) {
+    for (const { review, stage, runId, revision, completed } of rows) {
+      relate(`stage:${review}:${stage}`, turnEvent(runId), completed);
       for (const key of [reviewEvent(review), `stage:${review}:${stage}`]) {
         const group = refs.get(key) ?? new Map<string, MonarchJournalRef>();
         group.set(`${journalEvent(runId)}:${revision}`, { runId, revision });
@@ -686,7 +746,61 @@ const withJournalRefs = Effect.fn("MonarchTimeline.withJournalRefs")(function* (
       }
     }
   }
-  return events.map((event) => {
+  const prompts = events.filter((e) => e.entityKind === "prompt-schedule");
+  if (prompts.length) {
+    const ids = [...new Set(prompts.map((e) => e.entityId))];
+    const tasks = yield* sql<{
+      id: string;
+      thread: string | null;
+      at: string | null;
+      unbound: number;
+      creation: string | null;
+    }>`
+      WITH bindings(id,thread,creation) AS (
+        SELECT task_id,thread_id,NULL FROM scheduled_tasks WHERE project_id=${projectId} AND task_id IN ${sql.in(ids)}
+        UNION ALL
+        SELECT task_id,thread_id,created_at FROM monarch_prompt_creation_origins WHERE project_id=${projectId} AND task_id IN ${sql.in(ids)}
+      ) SELECT s.id,t.thread_id thread,t.created_at at,s.thread IS NULL unbound,s.creation FROM bindings s
+        LEFT JOIN monarch_project_context c ON c.project_id=${projectId}
+        LEFT JOIN orchestration_v2_projection_threads t ON t.project_id=${projectId} AND t.thread_id=s.thread AND t.deleted_at IS NULL
+          AND NOT EXISTS(SELECT 1 FROM json_each(c.settings_json,'$.excludedThreadIds') x WHERE x.value=t.thread_id)`;
+    const binding = new Map(tasks.map((t) => [`${t.id}:${t.creation ?? ""}`, t]));
+    const delivered = [...new Set(prompts.flatMap((e) => (e.threadId ? [e.threadId] : [])))];
+    const recipients = delivered.length
+      ? yield* sql<{
+          thread: ThreadId;
+          at: string;
+        }>`SELECT t.thread_id thread,t.created_at at FROM orchestration_v2_projection_threads t
+      LEFT JOIN monarch_project_context c ON c.project_id=t.project_id WHERE t.project_id=${projectId} AND t.thread_id IN ${sql.in(delivered)}
+        AND t.deleted_at IS NULL AND NOT EXISTS(SELECT 1 FROM json_each(c.settings_json,'$.excludedThreadIds') x WHERE x.value=t.thread_id)`
+      : [];
+    const recipientsById = new Map(recipients.map((r) => [r.thread, r]));
+    for (const e of prompts) {
+      const isCreation = e.id === `schedule:prompt-schedule:${e.entityId}`;
+      const task = binding.get(`${e.entityId}:${isCreation ? e.at : ""}`);
+      if (isCreation && task?.unbound === 1) projectRoots.add(e.id);
+      const target = e.threadId
+        ? recipientsById.get(e.threadId)
+        : isCreation || e.state === "upcoming" || e.state === "conditional"
+          ? task
+          : undefined;
+      if (target?.thread && target.at) relate(e.id, threadStart(target.thread), target.at);
+    }
+  }
+  return events.map((original) => {
+    const endpoints = [...(related.get(original.id) ?? [])]
+      .filter(([, at]) => original.at === null || Date.parse(at) <= Date.parse(original.at))
+      .map(([id]) => id)
+      .sort();
+    const projectScope =
+      projectRoots.has(original.id) ||
+      (original.entityKind === "review-schedule" &&
+        original.id === `schedule:review-schedule:${original.entityId}`);
+    const event = {
+      ...original,
+      ...(endpoints.length ? { relatedEventIds: endpoints } : {}),
+      ...(projectScope ? { projectScope: true } : {}),
+    };
     if (event.entityKind === "journal" && event.runId) {
       const revision = Number(event.id.slice(event.id.lastIndexOf(":") + 1));
       if (
@@ -694,7 +808,11 @@ const withJournalRefs = Effect.fn("MonarchTimeline.withJournalRefs")(function* (
         revision > 0 &&
         event.id === `${journalEvent(event.runId)}:${revision}`
       )
-        return { ...event, journalRefs: [{ runId: RunId.make(event.runId), revision }] };
+        return {
+          ...event,
+          relatedEventIds: event.parentIds.filter((id) => id === turnEvent(event.runId!)),
+          journalRefs: [{ runId: RunId.make(event.runId), revision }],
+        };
     }
     if ((event.entityKind === "review" || event.entityKind === "review-schedule") && event.runId) {
       const key = event.id.startsWith("stage:") ? event.id : reviewEvent(event.runId);
@@ -733,7 +851,7 @@ export const readTimelineHistory = Effect.fn("MonarchService.readTimelineHistory
   input: MonarchTimelineHistoryInput,
 ) {
   const page = yield* readHistoryPage(input);
-  return { ...page, events: yield* withJournalRefs(input.projectId, page.events) };
+  return { ...page, events: yield* withRelationships(input.projectId, page.events) };
 });
 export const readTimeline = Effect.fn("MonarchService.readTimeline")(function* (
   input: MonarchTimelineInput,
@@ -759,6 +877,7 @@ export const readTimeline = Effect.fn("MonarchService.readTimeline")(function* (
   ];
   const byId = new Map(chosen.map((e) => [e.id, e]));
   const selected = input.focus;
+  const focusPath = new Set<string>();
   if (selected) {
     if (selected.eventId && !byId.has(selected.eventId)) {
       const [exact] = yield* historyRows(input, [selected.eventId]);
@@ -782,6 +901,7 @@ export const readTimeline = Effect.fn("MonarchService.readTimeline")(function* (
       (e) => e.entityKind === selected.entityKind && e.entityId === selected.entityId,
     );
     for (let depth = 0; depth < 4 && path.length; depth++) {
+      for (const event of path) focusPath.add(event.id);
       const ids = [...new Set(path.flatMap((e) => e.parentIds))].slice(0, 80);
       const missing = ids.filter((id) => !byId.has(id));
       if (missing.length)
@@ -789,12 +909,20 @@ export const readTimeline = Effect.fn("MonarchService.readTimeline")(function* (
       path = ids.flatMap((id) => byId.get(id) ?? []);
     }
   }
+  const events = yield* withRelationships(input.projectId, [...byId.values()]);
+  if (selected) {
+    const missing = [
+      ...new Set(
+        events.flatMap((event) => (focusPath.has(event.id) ? (event.relatedEventIds ?? []) : [])),
+      ),
+    ]
+      .filter((id) => !byId.has(id))
+      .slice(0, 80);
+    if (missing.length) events.push(...(yield* historyRows(input, missing)));
+  }
   return {
     projectId: input.projectId,
-    events: yield* withJournalRefs(
-      input.projectId,
-      [...byId.values()].sort((a, b) => descending(b, a)),
-    ),
+    events: events.sort((a, b) => descending(b, a)),
     hasOlder: page.nextCursor !== null,
     nextCursor: page.nextCursor,
     visibilityKey: page.visibilityKey,
