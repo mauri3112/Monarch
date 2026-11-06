@@ -1,5 +1,5 @@
 import type { MonarchTimelineEvent, MonarchTimelineResult } from "@t3tools/contracts";
-import { MinusIcon, PlusIcon, XIcon } from "lucide-react";
+import { LocateFixedIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import {
   useEffect,
   useId,
@@ -11,6 +11,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from "react";
+import { createPortal } from "react-dom";
 
 import {
   Tooltip,
@@ -21,6 +22,7 @@ import {
 import { observeResize } from "../lib/observeResize";
 import { timelineWires, type TimelineMarkerPoint } from "./projectTimelineGeometry";
 import styles from "./ProjectTimeline.module.css";
+import { TimelineHeaderAction } from "./TimelineHeaderAction";
 
 function timelineEntityKey(event: Pick<MonarchTimelineEvent, "entityKind" | "entityId">) {
   return `${event.entityKind}:${event.entityId}`;
@@ -194,6 +196,7 @@ function TimelineEventPreviews({
 
 export interface ProjectTimelineProps {
   timeline: MonarchTimelineResult;
+  controlsHost?: HTMLElement | null;
   selectedNodeId?: string | null;
   onSelectNode?: (event: MonarchTimelineEvent | null) => void;
   onOpenEvent?: (event: MonarchTimelineEvent) => void;
@@ -201,13 +204,12 @@ export interface ProjectTimelineProps {
   hoveredEntityKey?: string | null;
   onHoverEntity?: (key: string | null) => void;
   renderActions?: (event: MonarchTimelineEvent) => ReactNode;
-  onLoadOlder?: () => void;
-  loadingOlder?: boolean;
   className?: string;
 }
 
 export function ProjectTimeline({
   timeline,
+  controlsHost,
   selectedNodeId,
   onSelectNode,
   onOpenEvent,
@@ -215,8 +217,6 @@ export function ProjectTimeline({
   hoveredEntityKey,
   onHoverEntity,
   renderActions,
-  onLoadOlder,
-  loadingOlder = false,
   className,
 }: ProjectTimelineProps) {
   const [localSelected, setLocalSelected] = useState<string | null>(null);
@@ -398,6 +398,43 @@ export function ProjectTimeline({
     };
   }, []);
 
+  const viewControls = (
+    <div className={styles["project-timeline-view-controls"]}>
+      <TimelineHeaderAction
+        label="Current activity"
+        icon={LocateFixedIcon}
+        onClick={revealCurrent}
+        disabled={!currentEvent}
+      />
+      <div className={styles["project-timeline-zoom"]} role="group" aria-label="Timeline size">
+        <button
+          type="button"
+          aria-label="Make timeline smaller"
+          disabled={zoom <= 0.8}
+          onClick={() => setZoom((value) => Math.max(0.8, +(value - 0.1).toFixed(1)))}
+        >
+          <MinusIcon aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          aria-label="Reset timeline size"
+          aria-description={`Current zoom is ${Math.round(zoom * 100)}%.`}
+          onClick={() => setZoom(1)}
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button
+          type="button"
+          aria-label="Make timeline larger"
+          disabled={zoom >= 1.4}
+          onClick={() => setZoom((value) => Math.min(1.4, +(value + 0.1).toFixed(1)))}
+        >
+          <PlusIcon aria-hidden="true" />
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <section
       ref={rootRef}
@@ -406,37 +443,14 @@ export function ProjectTimeline({
       data-motion={visible ? "playing" : "paused"}
       style={{ "--timeline-zoom": zoom } as CSSProperties}
     >
-      <div className={styles["project-timeline-toolbar"]}>
-        <div className={styles["project-timeline-zoom"]} aria-label="Timeline size">
-          {timeline.hasOlder && onLoadOlder ? (
-            <button type="button" onClick={onLoadOlder} disabled={loadingOlder}>
-              {loadingOlder ? "Loading…" : "Load older"}
-            </button>
-          ) : null}
-          <button type="button" onClick={revealCurrent} disabled={!currentEvent}>
-            Current activity
-          </button>
-          <button
-            type="button"
-            aria-label="Make timeline smaller"
-            disabled={zoom <= 0.8}
-            onClick={() => setZoom((value) => Math.max(0.8, +(value - 0.1).toFixed(1)))}
-          >
-            <MinusIcon aria-hidden="true" />
-          </button>
-          <button type="button" aria-label="Reset timeline size" onClick={() => setZoom(1)}>
-            {Math.round(zoom * 100)}%
-          </button>
-          <button
-            type="button"
-            aria-label="Make timeline larger"
-            disabled={zoom >= 1.4}
-            onClick={() => setZoom((value) => Math.min(1.4, +(value + 0.1).toFixed(1)))}
-          >
-            <PlusIcon aria-hidden="true" />
-          </button>
-        </div>
-      </div>
+      {controlsHost === undefined ? (
+        <header className={styles["project-timeline-header"]}>
+          <h2 className="text-sm font-medium">Timeline</h2>
+          {viewControls}
+        </header>
+      ) : (
+        controlsHost && createPortal(viewControls, controlsHost)
+      )}
       <TimelineEventPreviews
         ref={setViewport}
         boundary={viewport}

@@ -35,23 +35,43 @@
   outline-offset: 3px;
 }
 
-.project-timeline-toolbar {
+.project-timeline-header {
   display: flex;
-  flex: none;
-  justify-content: flex-end;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  padding: 5px 14px;
-  color: var(--timeline-muted);
-  font-size: 11px;
+  flex: none;
+  height: 48px;
+  gap: 12px;
+  padding-inline: 16px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
 }
 
+.project-timeline-view-controls,
+.project-timeline-panel-actions,
+.project-timeline-history,
 .project-timeline-zoom {
   display: flex;
   align-items: center;
 }
 
+.project-timeline-view-controls,
+.project-timeline-history {
+  gap: 4px;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+
+.project-timeline-panel-actions {
+  margin-inline-start: auto;
+  gap: 4px;
+}
+
+.project-timeline-zoom {
+  padding-inline-start: 4px;
+  border-inline-start: 1px solid var(--border);
+}
+
+.project-timeline-command,
 .project-timeline-zoom button,
 .project-timeline-details-heading > button {
   display: inline-flex;
@@ -64,20 +84,96 @@
   font-variant-numeric: tabular-nums;
 }
 
+.project-timeline-command,
+.project-timeline-zoom button {
+  cursor: pointer;
+}
+
+.project-timeline-command svg {
+  display: none;
+  width: 15px;
+  height: 15px;
+}
+
+.project-timeline-command:focus-visible,
+.project-timeline-zoom button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+
 .project-timeline-zoom svg,
 .project-timeline-details-heading svg {
   width: 14px;
   height: 14px;
 }
 
+.project-timeline-command:hover,
 .project-timeline-zoom button:hover,
 .project-timeline-details-heading > button:hover {
   background: var(--muted);
 }
 
+.project-timeline-command:disabled,
 .project-timeline-zoom button:disabled {
   cursor: default;
   opacity: 0.3;
+}
+
+@container project-timeline (max-width: 600px) {
+  .project-timeline-history .project-timeline-command svg {
+    display: block;
+  }
+  .project-timeline-history .project-timeline-command span {
+    display: none;
+  }
+}
+
+@container project-timeline (max-width: 460px) {
+  .project-timeline-header {
+    gap: 6px;
+    padding-inline: 8px;
+  }
+  .project-timeline-panel-actions,
+  .project-timeline-history,
+  .project-timeline-view-controls {
+    gap: 2px;
+  }
+  .project-timeline-header:has(.project-timeline-history) .project-timeline-command svg {
+    display: block;
+  }
+  .project-timeline-header:has(.project-timeline-history) .project-timeline-command span {
+    display: none;
+  }
+  .project-timeline-command,
+  .project-timeline-zoom button {
+    min-width: 26px;
+  }
+}
+
+@container project-timeline (max-width: 350px) {
+  .project-timeline-header {
+    gap: 3px;
+    padding-inline: 4px;
+  }
+  .project-timeline-panel-actions,
+  .project-timeline-history,
+  .project-timeline-view-controls {
+    gap: 0;
+  }
+  .project-timeline-command svg {
+    display: block;
+  }
+  .project-timeline-command span {
+    display: none;
+  }
+  .project-timeline-command,
+  .project-timeline-zoom button {
+    min-width: 24px;
+    padding-inline: 3px;
+  }
+  .project-timeline-zoom {
+    padding-inline-start: 2px;
+  }
 }
 
 .project-timeline-axis,

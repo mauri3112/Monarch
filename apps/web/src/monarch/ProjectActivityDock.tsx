@@ -1,7 +1,7 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { MonarchJournalRef, MonarchTimelineEvent, ScopedProjectRef } from "@t3tools/contracts";
 import { useState } from "react";
-import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
+import { ArrowDownIcon, ArrowUpIcon, Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { monarchEnvironment } from "../state/monarch";
 import { useQuietThreadShells } from "../state/entities";
@@ -9,7 +9,9 @@ import { overlayCurrentThreadActivity } from "./projectTimelineCurrentState";
 import { useEnvironmentQuery } from "../state/query";
 import { useMonarchDock } from "./MonarchDockContext";
 import { ProjectTimeline } from "./ProjectTimeline";
+import styles from "./ProjectTimeline.module.css";
 import { selectTimelineEvent } from "./projectTimelineSelection";
+import { TimelineHeaderAction } from "./TimelineHeaderAction";
 
 const journalTabTime = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -38,6 +40,7 @@ export function ProjectActivityDock({
   onToggleExpanded: () => void;
 }) {
   const dock = useMonarchDock();
+  const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
   const threads = useQuietThreadShells();
   const selection = dock?.selection;
   const baseQuery = useEnvironmentQuery(
@@ -159,19 +162,37 @@ export function ProjectActivityDock({
     if (document) dock?.openDocument?.(document);
   }
   return (
-    <section className="flex h-full min-h-0 min-w-0 flex-col" aria-label="Project Timeline">
-      <header className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
+    <section
+      className="@container/project-timeline flex h-full min-h-0 min-w-0 flex-col"
+      aria-label="Project Timeline"
+    >
+      <header className={styles["project-timeline-header"]}>
         <h2 className="text-sm font-medium">Timeline</h2>
-        <div className="flex items-center gap-1">
-          {historyPage >= 0 ? (
-            <Button
-              size="xs"
-              variant="ghost-muted"
-              onClick={() => setPaging({ ...pageState, index: historyPage - 1 })}
+        <div ref={setControlsHost} />
+        <div className={styles["project-timeline-panel-actions"]}>
+          {(query.data?.hasOlder || historyPage >= 0) && (
+            <div
+              role="group"
+              aria-label="Timeline history"
+              className={styles["project-timeline-history"]}
             >
-              Newer activity
-            </Button>
-          ) : null}
+              {query.data?.hasOlder && (
+                <TimelineHeaderAction
+                  label={history.isPending ? "Loading…" : "Load older"}
+                  icon={ArrowUpIcon}
+                  onClick={loadOlder}
+                  disabled={history.isPending}
+                />
+              )}
+              {historyPage >= 0 && (
+                <TimelineHeaderAction
+                  label="Newer activity"
+                  icon={ArrowDownIcon}
+                  onClick={() => setPaging({ ...pageState, index: historyPage - 1 })}
+                />
+              )}
+            </div>
+          )}
           <Button
             size="icon-sm"
             variant="ghost"
@@ -204,12 +225,11 @@ export function ProjectActivityDock({
       ) : query.data ? (
         <ProjectTimeline
           timeline={query.data}
+          controlsHost={controlsHost}
           selectedNodeId={selected?.id ?? null}
           onSelectNode={choose}
           onOpenEvent={open}
           detailPresentation={(event) => (documentFor(event) ? "external" : "inline")}
-          onLoadOlder={loadOlder}
-          loadingOlder={history.isPending}
           hoveredEntityKey={dock?.hoveredEntityKey ?? null}
           onHoverEntity={(key) => dock?.hoverEntity?.(key)}
           renderActions={(event) => (

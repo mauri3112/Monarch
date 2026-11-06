@@ -63,16 +63,13 @@ vi.mock("../state/query", () => ({
 vi.mock("./ProjectTimeline", () => ({
   ProjectTimeline: ({
     timeline,
-    onLoadOlder,
   }: {
-    timeline: { events: Array<{ id: string; title: string }>; hasOlder: boolean };
-    onLoadOlder: () => void;
+    timeline: { events: Array<{ id: string; title: string }> };
   }) => (
     <div>
       {timeline.events.map((event) => (
         <span key={event.id}>{event.title}</span>
       ))}
-      {timeline.hasOlder ? <button onClick={onLoadOlder}>Load older activity</button> : null}
     </div>
   ),
 }));
@@ -88,7 +85,7 @@ it("adds unseen activity on the first older click, reverses, and discards pages 
     <ProjectActivityDock projectRef={projectRef} expanded={false} onToggleExpanded={() => {}} />,
   );
   await expect.element(screen.getByText("Activity 1", { exact: true })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Load older activity" }));
+  await userEvent.click(screen.getByRole("button", { name: "Load older" }));
   expect(mocks.historyRequests.at(-1)).toEqual({
     environmentId: "environment",
     input: {
@@ -100,7 +97,7 @@ it("adds unseen activity on the first older click, reverses, and discards pages 
   await expect.element(screen.getByText("Activity 1", { exact: true })).toBeVisible();
   await userEvent.click(screen.getByRole("button", { name: "Newer activity" }));
   await expect.element(screen.getByText("Activity 1", { exact: true })).not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Load older activity" }));
+  await userEvent.click(screen.getByRole("button", { name: "Load older" }));
   await expect.element(screen.getByText("Activity 1", { exact: true })).toBeVisible();
   mocks.visibilityKey = "visible-2";
   await screen.rerender(
@@ -110,7 +107,7 @@ it("adds unseen activity on the first older click, reverses, and discards pages 
   await expect
     .element(screen.getByRole("button", { name: "Newer activity" }))
     .not.toBeInTheDocument();
-  await userEvent.click(screen.getByRole("button", { name: "Load older activity" }));
+  await userEvent.click(screen.getByRole("button", { name: "Load older" }));
   expect(mocks.historyRequests.at(-1)).toMatchObject({ input: { visibilityKey: "visible-2" } });
   await expect.element(screen.getByText("Activity 1", { exact: true })).not.toBeInTheDocument();
 });
