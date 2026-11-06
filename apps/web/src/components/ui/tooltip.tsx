@@ -124,6 +124,7 @@ function TooltipPopup({
   side = "top",
   variant = "default",
   anchor,
+  portalContainer,
   children,
   ...props
 }: TooltipPrimitive.Popup.Props & {
@@ -132,10 +133,17 @@ function TooltipPopup({
   sideOffset?: TooltipPrimitive.Positioner.Props["sideOffset"];
   variant?: "default" | "glass" | "code";
   anchor?: TooltipPrimitive.Positioner.Props["anchor"];
+  portalContainer?: HTMLElement | null;
 }) {
   return (
-    <TooltipPrimitive.Portal>
-      <TooltipPositioner align={align} anchor={anchor} side={side} sideOffset={sideOffset}>
+    <TooltipPrimitive.Portal container={portalContainer}>
+      <TooltipPositioner
+        align={align}
+        anchor={anchor}
+        side={side}
+        sideOffset={sideOffset}
+        collisionBoundary={portalContainer ?? undefined}
+      >
         <TooltipPrimitive.Popup
           className={cn(
             "relative flex origin-(--transform-origin) text-balance rounded-md text-popover-foreground text-xs transition-[scale,opacity] before:pointer-events-none before:absolute before:inset-0 before:rounded-[calc(var(--radius-md)-1px)] before:shadow-[0_1px_--theme(--color-black/4%)] data-ending-style:scale-98 data-starting-style:scale-98 data-ending-style:opacity-0 data-starting-style:opacity-0 data-instant:duration-0 dark:before:shadow-[0_-1px_--theme(--color-white/6%)]",

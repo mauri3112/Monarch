@@ -30,7 +30,7 @@
 }
 
 .project-timeline button:focus-visible,
-.project-timeline-scroll:focus-visible {
+.project-timeline [data-timeline-viewport]:focus-visible {
   outline: 2px solid var(--timeline-work);
   outline-offset: 3px;
 }
@@ -38,7 +38,7 @@
 .project-timeline-toolbar {
   display: flex;
   flex: none;
-  justify-content: space-between;
+  justify-content: flex-end;
   align-items: center;
   flex-wrap: wrap;
   gap: 4px;
@@ -109,7 +109,8 @@
   transform: translateX(-50%);
 }
 
-.project-timeline-scroll {
+.project-timeline [data-timeline-viewport] {
+  position: relative;
   display: flex;
   flex-direction: column;
   flex: 1 1 210px;
@@ -351,11 +352,11 @@
 }
 
 .project-timeline-event[data-linked] .project-timeline-title {
-  font-weight: 550;
+  color: color-mix(in srgb, var(--foreground) 65%, var(--timeline-color));
 }
 
 .project-timeline-event[data-selected] .project-timeline-title {
-  font-weight: 650;
+  color: var(--foreground);
   text-decoration: underline solid var(--timeline-color);
   text-decoration-thickness: 2px;
   text-underline-offset: 3px;
@@ -376,24 +377,17 @@
   font-weight: 550;
 }
 
-.project-timeline-subtitle {
-  display: none;
-  margin-top: 5px;
-  color: var(--timeline-muted);
-  font-size: 10px;
-  line-height: 1.5;
-}
-
-.project-timeline-event:hover .project-timeline-subtitle,
-.project-timeline-event:focus-visible .project-timeline-subtitle {
-  display: block;
-}
-
-.project-timeline-related-note {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+.project-timeline-preview {
+  display: grid;
+  gap: 4px;
+  max-height: max(0px, calc(var(--available-height, 14rem) - 12px));
   overflow: hidden;
+  text-align: start;
+}
+
+.project-timeline [data-slot="tooltip-positioner"],
+.project-timeline [data-slot="tooltip-popup"] {
+  transition: none;
 }
 
 .project-timeline-legend {
@@ -488,7 +482,7 @@
 }
 
 @container project-timeline (max-width: 500px) {
-  .project-timeline-scroll {
+  .project-timeline [data-timeline-viewport] {
     --timeline-grid: 43px repeat(3, minmax(0, 1fr));
     --timeline-gap: 18px;
   }
@@ -519,7 +513,7 @@
 }
 
 @container project-timeline (max-width: 340px) {
-  .project-timeline-scroll {
+  .project-timeline [data-timeline-viewport] {
     --timeline-gap: 14px;
     --timeline-grid: 35px repeat(3, minmax(0, 1fr));
   }

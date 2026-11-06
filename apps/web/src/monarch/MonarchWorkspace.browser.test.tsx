@@ -75,11 +75,12 @@ vi.mock("./ProjectBoard", async () => {
 vi.mock("./ProjectActivityDock", async () => {
   const { useMonarchDock } = await import("./MonarchDockContext");
   return {
-    ProjectActivityDock: () => {
+    ProjectActivityDock: ({ onToggleExpanded }: { onToggleExpanded: () => void }) => {
       const dock = useMonarchDock();
       return (
         <div>
           <textarea aria-label="Timeline viewport" defaultValue="" />
+          <button onClick={onToggleExpanded}>Expand graph</button>
           <button
             onClick={() =>
               dock?.openDocument?.({
@@ -310,6 +311,31 @@ it("returns to the same mounted Timeline and native draft on a narrow workspace"
     .element(screen.getByRole("textbox", { name: "Conversation composer" }))
     .toHaveValue("Narrow unsent draft");
   expect(screen.container.querySelectorAll('[aria-label="Conversation composer"]')).toHaveLength(1);
+  const toggle = screen
+    .getByRole("navigation", { name: "Project navigation" })
+    .getByRole("button", { name: "Timeline", exact: true });
+  await userEvent.click(screen.getByRole("button", { name: "Hide document pane" }));
+  await expect.element(screen.getByRole("textbox", { name: "Timeline viewport" })).toBeVisible();
+  await userEvent.click(toggle);
+  await expect
+    .element(screen.getByRole("region", { name: "Project workspace", exact: true }))
+    .toBeVisible();
+  expect(screen.container.querySelectorAll('[role="tab"]')).toHaveLength(2);
+  expect(
+    (screen.container.querySelector('[aria-label="Conversation composer"]') as HTMLTextAreaElement)
+      .value,
+  ).toBe("Narrow unsent draft");
+  await userEvent.click(toggle);
+  await userEvent.click(screen.getByRole("button", { name: "Documents 2" }));
+  await expect
+    .element(screen.getByRole("textbox", { name: "Conversation composer" }))
+    .toHaveValue("Narrow unsent draft");
+  await userEvent.click(toggle);
+  await expect.element(screen.getByRole("textbox", { name: "Timeline viewport" })).toBeVisible();
+  await userEvent.click(toggle);
+  await expect
+    .element(screen.getByRole("textbox", { name: "Conversation composer" }))
+    .toHaveValue("Narrow unsent draft");
 });
 
 it("retains the established project while its explicitly opened cold thread loads and validates its eventual owner", async () => {
@@ -425,4 +451,60 @@ it("roves document tabs, restores exact graph owners, and returns focus on close
   expect(mocks.resolveSuggestion).toHaveBeenCalledTimes(1);
   await userEvent.click(screen.getByRole("button", { name: "Close Draft thread", exact: true }));
   await expect.element(screen.getByRole("region", { name: "Project control panel" })).toHaveFocus();
+});
+
+it("keeps a state-aware Timeline toggle after Projects through graph and document layouts", async () => {
+  mocks.resolveSuggestion.mockReset().mockResolvedValue(null);
+  const container = roomyContainer();
+  const projectRef = scopeProjectRef(EnvironmentId.make("environment"), ProjectId.make("project"));
+  await using screen = await render(
+    <MonarchWorkspace
+      target={{ kind: "draft", draftId: "draft" as DraftId }}
+      projectRef={projectRef}
+    />,
+    { container, router: "/draft/draft" },
+  );
+  const navigation = screen.getByRole("navigation", { name: "Project navigation" });
+  await expect.element(navigation).toBeVisible();
+  const toggle = navigation.getByRole("button", { name: "Timeline", exact: true });
+  const composer = screen.getByRole("textbox", { name: "Conversation composer" });
+  await userEvent.fill(composer, "Preserve this unsent draft");
+  const nativeNode = screen.container.querySelector('[aria-label="Conversation composer"]');
+  const projectLink = screen.container.querySelector('nav[aria-label="Project navigation"] a')!;
+  expect(projectLink.nextElementSibling?.textContent?.trim()).toBe("Timeline");
+  await expect.element(toggle).toHaveAttribute("aria-pressed", "true");
+  await userEvent.click(toggle);
+  await expect.element(toggle).toHaveAttribute("aria-pressed", "false");
+  await expect.element(composer).toHaveValue("Preserve this unsent draft");
+  await userEvent.click(toggle);
+  await expect.element(screen.getByRole("textbox", { name: "Timeline viewport" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Expand thread", exact: true }));
+  await expect.element(toggle).toHaveAttribute("aria-pressed", "false");
+  await userEvent.click(toggle);
+  await expect.element(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect.element(composer).toHaveValue("Preserve this unsent draft");
+  await userEvent.click(screen.getByRole("button", { name: "Open journal", exact: true }));
+  container.style.width = "620px";
+  await expect.element(toggle).toHaveAttribute("aria-pressed", "false");
+  await userEvent.click(toggle);
+  await expect.element(screen.getByRole("textbox", { name: "Timeline viewport" })).toBeVisible();
+  await userEvent.click(toggle);
+  await expect.element(screen.getByText("Journal revision 1")).toBeVisible();
+  await expect
+    .element(screen.getByRole("tab", { name: "Draft thread", exact: true }))
+    .toBeVisible();
+  await userEvent.click(screen.getByRole("tab", { name: "Draft thread", exact: true }));
+  await expect.element(composer).toHaveValue("Preserve this unsent draft");
+  expect(screen.container.querySelector('[aria-label="Conversation composer"]')).toBe(nativeNode);
+  container.style.width = "1100px";
+  await expect.element(toggle).toHaveAttribute("aria-pressed", "true");
+  await userEvent.click(screen.getByRole("button", { name: "Hide document pane" }));
+  await userEvent.click(screen.getByRole("button", { name: "Expand graph" }));
+  await expect.element(navigation).toBeVisible();
+  await userEvent.click(toggle);
+  await expect
+    .element(screen.getByRole("region", { name: "Project workspace", exact: true }))
+    .toBeVisible();
+  await userEvent.click(toggle);
+  await expect.element(screen.getByRole("textbox", { name: "Timeline viewport" })).toBeVisible();
 });

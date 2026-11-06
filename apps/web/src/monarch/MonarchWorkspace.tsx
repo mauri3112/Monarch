@@ -6,7 +6,14 @@ import {
 } from "@t3tools/client-runtime/environment";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeftIcon, FilesIcon, Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
+import {
+  ActivityIcon,
+  ArrowLeftIcon,
+  FilesIcon,
+  Maximize2Icon,
+  Minimize2Icon,
+  XIcon,
+} from "lucide-react";
 import {
   Activity,
   useLayoutEffect,
@@ -219,6 +226,11 @@ export function MonarchWorkspace({
   const pendingSuggestions = useRef(new Map<string, Promise<ThreadRouteTarget | null>>());
   const suggestionCompletions = useRef(new Set<string>());
   const tabGenerations = useRef(new Map<string, number>());
+  const timelineReturnDocument = useRef<{
+    scopeKey: string;
+    tabId: string;
+    generation: number;
+  } | null>(null);
   const [actionHost, setActionHost] = useState<HTMLElement | null>(null);
   const [documentError, setDocumentError] = useState<{
     scopeKey: string;
@@ -316,6 +328,9 @@ export function MonarchWorkspace({
   const controlVisible =
     activeDock !== null && (!expanded || !documentsOpen) && (!compact || !documentsOpen);
   const controlSized = controlVisible && boardVisible && !documentsOpen;
+  const timelineVisible =
+    projectRef !== null && controlVisible && activeDock === "timeline" && !background;
+  const timelinePaneDomId = `${documentDomId}-timeline`;
   const nativeActive = activeDocument?.kind === "thread" || activeDocument?.kind === "draft";
   const nativeVisible = documentsOpen && nativeActive;
   const nativeThreadRef =
@@ -333,11 +348,51 @@ export function MonarchWorkspace({
     else void navigate({ to: "/draft/$draftId", params: { draftId: next.draftId } });
   };
   const showTimeline = () => {
+    timelineReturnDocument.current = null;
     updateDocuments({ ...readDocuments(), visible: false });
     setExpanded(false);
     setDockState({ scopeKey, kind: "timeline", targetKey: null, branch: null });
   };
+  const closeDock = () => {
+    setTimelineExpanded(false);
+    setDockState({ scopeKey, kind: null, targetKey: null, branch: null });
+    const current = readDocuments();
+    const displaced = timelineReturnDocument.current;
+    timelineReturnDocument.current = null;
+    if (
+      activeDock === "timeline" &&
+      !current.visible &&
+      displaced?.scopeKey === current.scopeKey &&
+      displaced.tabId === current.activeId &&
+      displaced.generation === (tabGenerations.current.get(displaced.tabId) ?? 0)
+    )
+      updateDocuments({ ...current, visible: true });
+  };
+  const toggleTimeline = () => {
+    if (timelineVisible) {
+      closeDock();
+      return;
+    }
+    const current = readDocuments();
+    timelineReturnDocument.current =
+      compact && current.visible && current.activeId
+        ? {
+            scopeKey,
+            tabId: current.activeId,
+            generation: tabGenerations.current.get(current.activeId) ?? 0,
+          }
+        : null;
+    setExpanded(false);
+    setTimelineExpanded(false);
+    setDockState({ scopeKey, kind: "timeline", targetKey: null, branch: null });
+    if (compact) updateDocuments({ ...current, visible: false });
+  };
+  const showDocuments = () => {
+    timelineReturnDocument.current = null;
+    updateDocuments({ ...readDocuments(), visible: true });
+  };
   const selectDocumentOwner = (tab: ProjectDocumentTab) => {
+    timelineReturnDocument.current = null;
     const owner = projectDocumentSelection(tab.document, tab.selection);
     selectionIntent.current = { scopeKey, value: owner };
     setSelection({ scopeKey, value: owner });
@@ -357,6 +412,7 @@ export function MonarchWorkspace({
     if (nextTarget) navigateTarget(nextTarget);
   };
   const closeTab = (id: string) => {
+    timelineReturnDocument.current = null;
     setExpanded(false);
     const current = readDocuments();
     const closing = current.tabs.find((tab) => tab.id === id);
@@ -502,12 +558,16 @@ export function MonarchWorkspace({
       selectionIntent.current = { scopeKey, value: next };
       setSelection({ scopeKey, value: next });
       setDockState({ scopeKey, kind: "timeline", targetKey: null, branch: null });
-      if (compact) showTimeline();
+      if (compact) {
+        updateDocuments({ ...readDocuments(), visible: false });
+        setExpanded(false);
+      }
     },
     actionHost,
     setActionHost,
     host: dockHost,
     open: (kind: MonarchDockKind, branch?: string | null) => {
+      timelineReturnDocument.current = null;
       setDockState({
         scopeKey,
         kind,
@@ -516,7 +576,7 @@ export function MonarchWorkspace({
       });
       if (compact) updateDocuments({ ...readDocuments(), visible: false });
     },
-    close: () => setDockState({ scopeKey, kind: null, targetKey: null, branch: null }),
+    close: closeDock,
     updateIncludedBranch: (branch: string | null) =>
       setDockState((current) =>
         current.scopeKey === scopeKey &&
@@ -556,261 +616,269 @@ export function MonarchWorkspace({
     <MonarchDockContext value={dockController}>
       <div
         ref={setWorkspaceElement}
-        className="@container/monarch flex h-dvh min-h-0 min-w-0 flex-1 overflow-hidden bg-background"
+        className="@container/monarch flex h-dvh min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background"
         data-thread-open={documents.nativeTarget !== null}
         data-dock-open={activeDock !== null}
         inert={background}
       >
-        <section
-          className={cn(
-            "relative min-h-0 min-w-0 flex-col",
-            boardVisible ? "flex" : "hidden",
-            boardSized ? "shrink-0 border-r border-border" : "flex-1",
-          )}
-          style={boardSized ? sized(boardWidth.width) : undefined}
-          {...workspaceAreaProps("home", 1, "Project workspace")}
-          aria-label="Project workspace"
-        >
-          <WorkspacePageHeader electron={isElectron}>
+        <WorkspacePageHeader electron={isElectron} className="border-b border-border">
+          <nav aria-label="Project navigation" className="flex items-center gap-1">
             <Button size="sm" variant="ghost" render={<Link to="/" />}>
               <ArrowLeftIcon /> Projects
             </Button>
-          </WorkspacePageHeader>
-          {project && projectRef ? (
-            <ProjectBoard
-              key={scopeKey}
-              project={project}
-              projectRef={projectRef}
-              selectedThreadRef={nativeThreadRef}
-              actions={projectActions?.(projectRef)}
-            />
-          ) : (
-            <div className="p-6 text-sm text-muted-foreground" role="status">
-              {shellStatus === "live" && projectRef ? "Project unavailable" : "Loading project…"}
-            </div>
-          )}
-          {boardSized ? (
-            <div
-              role="separator"
-              aria-label="Resize project workspace"
-              aria-orientation="vertical"
-              className="absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
-              {...boardWidth.handlers}
-            />
-          ) : null}
-        </section>
-        <section
-          className={cn(
-            "relative min-h-0 min-w-0 flex-col border-l border-border",
-            controlVisible ? "flex" : "hidden",
-            controlSized ? "shrink-0" : "flex-1",
-          )}
-          style={controlSized ? sized(controlWidth.width) : undefined}
-          aria-label="Project control panel"
-          ref={controlPanel}
-          tabIndex={-1}
-        >
-          {!boardVisible || (documents.tabs.length > 0 && !documentsOpen) ? (
-            <div className="flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-border px-2">
-              {!boardVisible ? (
-                <Button size="sm" variant="ghost" render={<Link to="/" />}>
-                  <ArrowLeftIcon /> Projects
-                </Button>
-              ) : null}
-              {documents.tabs.length > 0 && !documentsOpen ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => updateDocuments({ ...readDocuments(), visible: true })}
-                >
+            <Button
+              size="sm"
+              variant={timelineVisible ? "secondary" : "ghost"}
+              aria-pressed={timelineVisible}
+              aria-expanded={timelineVisible}
+              aria-controls={timelinePaneDomId}
+              disabled={!projectRef}
+              onClick={toggleTimeline}
+            >
+              <ActivityIcon /> Timeline
+            </Button>
+          </nav>
+        </WorkspacePageHeader>
+        <div className="flex min-h-0 min-w-0 flex-1">
+          <section
+            className={cn(
+              "relative min-h-0 min-w-0 flex-col",
+              boardVisible ? "flex" : "hidden",
+              boardSized ? "shrink-0 border-r border-border" : "flex-1",
+            )}
+            style={boardSized ? sized(boardWidth.width) : undefined}
+            {...workspaceAreaProps("home", 1, "Project workspace")}
+            aria-label="Project workspace"
+          >
+            {project && projectRef ? (
+              <ProjectBoard
+                key={scopeKey}
+                project={project}
+                projectRef={projectRef}
+                selectedThreadRef={nativeThreadRef}
+                actions={projectActions?.(projectRef)}
+              />
+            ) : (
+              <div className="p-6 text-sm text-muted-foreground" role="status">
+                {shellStatus === "live" && projectRef ? "Project unavailable" : "Loading project…"}
+              </div>
+            )}
+            {boardSized ? (
+              <div
+                role="separator"
+                aria-label="Resize project workspace"
+                aria-orientation="vertical"
+                className="absolute inset-y-0 -right-1 z-20 w-2 cursor-col-resize"
+                {...boardWidth.handlers}
+              />
+            ) : null}
+          </section>
+          <section
+            className={cn(
+              "relative min-h-0 min-w-0 flex-col border-l border-border",
+              controlVisible ? "flex" : "hidden",
+              controlSized ? "shrink-0" : "flex-1",
+            )}
+            style={controlSized ? sized(controlWidth.width) : undefined}
+            aria-label="Project control panel"
+            ref={controlPanel}
+            tabIndex={-1}
+          >
+            {documents.tabs.length > 0 && !documentsOpen ? (
+              <div className="flex min-h-9 shrink-0 items-center justify-between gap-2 border-b border-border px-2">
+                <Button size="sm" variant="ghost" onClick={showDocuments}>
                   <FilesIcon /> Documents {documents.tabs.length}
                 </Button>
-              ) : null}
-            </div>
-          ) : null}
-          <div
-            className={cn("min-h-0 min-w-0 flex-1", activeDock === "timeline" ? "block" : "hidden")}
-          >
-            {projectRef ? (
-              <Activity
-                mode={
-                  controlVisible && activeDock === "timeline" && !background ? "visible" : "hidden"
-                }
-              >
-                <ProjectActivityDock
-                  key={scopeKey}
-                  projectRef={projectRef}
-                  expanded={timelineExpanded}
-                  onToggleExpanded={() => setTimelineExpanded((value) => !value)}
-                />
-              </Activity>
-            ) : null}
-          </div>
-          <div
-            ref={setDockHost}
-            className={cn("min-h-0 min-w-0 flex-1", activeDock === "timeline" ? "hidden" : "block")}
-            data-monarch-dock-host
-          >
-            {activeDock === "included" && projectRef ? (
-              <ProjectContextIncludedNotice
-                projectRef={projectRef}
-                branch={dockState.branch}
-                panelOnly
-                onClose={dockController.close}
-              />
-            ) : null}
-          </div>
-          {controlSized ? (
-            <div
-              role="separator"
-              aria-label="Resize project control panel"
-              aria-orientation="vertical"
-              className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize"
-              {...controlWidth.handlers}
-            />
-          ) : null}
-        </section>
-        <section
-          className={cn(
-            "relative min-h-0 min-w-0 flex-col border-l border-border",
-            documentsOpen ? "flex" : "hidden",
-            compact || expanded ? "flex-1" : "shrink-0",
-          )}
-          style={!compact && !expanded ? sized(documentWidth.width) : undefined}
-          {...workspaceAreaProps("panel", 4, "Project documents")}
-        >
-          <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
-            {!controlVisible || activeDock !== "timeline" ? (
-              <Button size="sm" variant="ghost" onClick={showTimeline}>
-                <ArrowLeftIcon /> Timeline
-              </Button>
+              </div>
             ) : null}
             <div
-              role="tablist"
-              aria-orientation="horizontal"
-              aria-label="Open project documents"
-              className="flex min-w-0 flex-1 gap-1 overflow-x-auto"
-            >
-              {documents.tabs.map((tab, index) => (
-                <div key={tab.id} className="flex shrink-0 items-center gap-0.5">
-                  <button
-                    type="button"
-                    role="tab"
-                    id={tabDomId(tab.id)}
-                    aria-controls={panelDomId}
-                    tabIndex={tab.id === documents.activeId ? 0 : -1}
-                    ref={(element) => {
-                      if (element) tabButtons.current.set(tab.id, element);
-                      else tabButtons.current.delete(tab.id);
-                    }}
-                    onKeyDown={(event) => navigateTabs(event, index)}
-                    aria-selected={tab.id === documents.activeId}
-                    className="max-w-44 truncate rounded px-2 py-1 text-xs aria-selected:bg-accent"
-                    onClick={() => activateTab(tab)}
-                  >
-                    {documentTitle(tab.document)}
-                  </button>
-                  <Button
-                    size="icon-xs"
-                    variant="ghost"
-                    aria-label={`Close ${documentTitle(tab.document)}`}
-                    onClick={() => closeTab(tab.id)}
-                  >
-                    <XIcon />
-                  </Button>
-                </div>
-              ))}
-            </div>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label={
-                nativeActive
-                  ? expanded
-                    ? "Show project beside thread"
-                    : "Expand thread"
-                  : expanded
-                    ? "Show Timeline beside document"
-                    : "Expand document pane"
-              }
-              onClick={() => setExpanded((value) => !value)}
-            >
-              {expanded ? <Minimize2Icon /> : <Maximize2Icon />}
-            </Button>
-            <Button
-              size="icon-sm"
-              variant="ghost"
-              aria-label="Hide document pane"
-              onClick={showTimeline}
-            >
-              <XIcon />
-            </Button>
-          </div>
-          {nativeThreadRef && nativeActive ? (
-            <div className="flex shrink-0 justify-end border-b border-border px-2">
-              {threadActions?.(nativeThreadRef)}
-            </div>
-          ) : null}
-          <div
-            className="relative flex min-h-0 min-w-0 flex-1 flex-col"
-            role="tabpanel"
-            id={panelDomId}
-            aria-labelledby={activeTab ? tabDomId(activeTab.id) : undefined}
-          >
-            {documentError?.scopeKey === scopeKey && documentError.id === activeTab?.id ? (
-              <p role="alert" className="shrink-0 px-3 py-2 text-xs text-destructive">
-                {documentError.message}
-              </p>
-            ) : null}
-            <div
-              ref={setDocumentHost}
               className={cn(
-                "min-h-0 min-w-0",
-                activeDocument?.kind === "suggestion"
-                  ? "flex-1 overflow-y-auto"
-                  : nativeActive && activeDocument.suggestionId
-                    ? "shrink-0"
-                    : "hidden",
+                "min-h-0 min-w-0 flex-1",
+                activeDock === "timeline" ? "block" : "hidden",
               )}
-              data-monarch-document-host
-            />
-            <section
-              className={cn("min-h-0 min-w-0 flex-1 flex-col", nativeVisible ? "flex" : "hidden")}
-              aria-label="Thread conversation"
+              id={timelinePaneDomId}
             >
-              {documents.nativeTarget ? (
-                <ThreadRouteView
-                  target={documents.nativeTarget}
-                  background={background || !nativeVisible}
-                  contained
+              {projectRef ? (
+                <Activity
+                  mode={
+                    controlVisible && activeDock === "timeline" && !background
+                      ? "visible"
+                      : "hidden"
+                  }
+                >
+                  <ProjectActivityDock
+                    key={scopeKey}
+                    projectRef={projectRef}
+                    expanded={timelineExpanded}
+                    onToggleExpanded={() => setTimelineExpanded((value) => !value)}
+                  />
+                </Activity>
+              ) : null}
+            </div>
+            <div
+              ref={setDockHost}
+              className={cn(
+                "min-h-0 min-w-0 flex-1",
+                activeDock === "timeline" ? "hidden" : "block",
+              )}
+              data-monarch-dock-host
+            >
+              {activeDock === "included" && projectRef ? (
+                <ProjectContextIncludedNotice
+                  projectRef={projectRef}
+                  branch={dockState.branch}
+                  panelOnly
+                  onClose={dockController.close}
                 />
               ) : null}
-            </section>
-            {documentsOpen && !background && activeDocument?.kind === "journal" && projectRef ? (
-              <ProjectJournalTab
-                key={activeTab?.id}
-                projectRef={projectRef}
-                runId={activeDocument.runId}
-                revision={activeDocument.revision}
-                onOpenThread={(threadId) =>
-                  openDocument({
-                    kind: "thread",
-                    threadRef: scopeThreadRef(projectRef.environmentId, threadId),
-                  })
-                }
+            </div>
+            {controlSized ? (
+              <div
+                role="separator"
+                aria-label="Resize project control panel"
+                aria-orientation="vertical"
+                className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize"
+                {...controlWidth.handlers}
               />
             ) : null}
-          </div>
-          {!compact && !expanded ? (
+          </section>
+          <section
+            className={cn(
+              "relative min-h-0 min-w-0 flex-col border-l border-border",
+              documentsOpen ? "flex" : "hidden",
+              compact || expanded || !controlVisible ? "flex-1" : "shrink-0",
+            )}
+            style={!compact && !expanded && controlVisible ? sized(documentWidth.width) : undefined}
+            {...workspaceAreaProps("panel", 4, "Project documents")}
+          >
+            <div className="flex shrink-0 items-center gap-1 border-b border-border px-2 py-1">
+              <div
+                role="tablist"
+                aria-orientation="horizontal"
+                aria-label="Open project documents"
+                className="flex min-w-0 flex-1 gap-1 overflow-x-auto"
+              >
+                {documents.tabs.map((tab, index) => (
+                  <div key={tab.id} className="flex shrink-0 items-center gap-0.5">
+                    <button
+                      type="button"
+                      role="tab"
+                      id={tabDomId(tab.id)}
+                      aria-controls={panelDomId}
+                      tabIndex={tab.id === documents.activeId ? 0 : -1}
+                      ref={(element) => {
+                        if (element) tabButtons.current.set(tab.id, element);
+                        else tabButtons.current.delete(tab.id);
+                      }}
+                      onKeyDown={(event) => navigateTabs(event, index)}
+                      aria-selected={tab.id === documents.activeId}
+                      className="max-w-44 truncate rounded px-2 py-1 text-xs aria-selected:bg-accent"
+                      onClick={() => activateTab(tab)}
+                    >
+                      {documentTitle(tab.document)}
+                    </button>
+                    <Button
+                      size="icon-xs"
+                      variant="ghost"
+                      aria-label={`Close ${documentTitle(tab.document)}`}
+                      onClick={() => closeTab(tab.id)}
+                    >
+                      <XIcon />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label={
+                  nativeActive
+                    ? expanded
+                      ? "Show project beside thread"
+                      : "Expand thread"
+                    : expanded
+                      ? "Show Timeline beside document"
+                      : "Expand document pane"
+                }
+                onClick={() => setExpanded((value) => !value)}
+              >
+                {expanded ? <Minimize2Icon /> : <Maximize2Icon />}
+              </Button>
+              <Button
+                size="icon-sm"
+                variant="ghost"
+                aria-label="Hide document pane"
+                onClick={showTimeline}
+              >
+                <XIcon />
+              </Button>
+            </div>
+            {nativeThreadRef && nativeActive ? (
+              <div className="flex shrink-0 justify-end border-b border-border px-2">
+                {threadActions?.(nativeThreadRef)}
+              </div>
+            ) : null}
             <div
-              role="separator"
-              aria-label="Resize document pane"
-              aria-orientation="vertical"
-              className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize"
-              {...documentWidth.handlers}
-            />
-          ) : null}
-        </section>
+              className="relative flex min-h-0 min-w-0 flex-1 flex-col"
+              role="tabpanel"
+              id={panelDomId}
+              aria-labelledby={activeTab ? tabDomId(activeTab.id) : undefined}
+            >
+              {documentError?.scopeKey === scopeKey && documentError.id === activeTab?.id ? (
+                <p role="alert" className="shrink-0 px-3 py-2 text-xs text-destructive">
+                  {documentError.message}
+                </p>
+              ) : null}
+              <div
+                ref={setDocumentHost}
+                className={cn(
+                  "min-h-0 min-w-0",
+                  activeDocument?.kind === "suggestion"
+                    ? "flex-1 overflow-y-auto"
+                    : nativeActive && activeDocument.suggestionId
+                      ? "shrink-0"
+                      : "hidden",
+                )}
+                data-monarch-document-host
+              />
+              <section
+                className={cn("min-h-0 min-w-0 flex-1 flex-col", nativeVisible ? "flex" : "hidden")}
+                aria-label="Thread conversation"
+              >
+                {documents.nativeTarget ? (
+                  <ThreadRouteView
+                    target={documents.nativeTarget}
+                    background={background || !nativeVisible}
+                    contained
+                  />
+                ) : null}
+              </section>
+              {documentsOpen && !background && activeDocument?.kind === "journal" && projectRef ? (
+                <ProjectJournalTab
+                  key={activeTab?.id}
+                  projectRef={projectRef}
+                  runId={activeDocument.runId}
+                  revision={activeDocument.revision}
+                  onOpenThread={(threadId) =>
+                    openDocument({
+                      kind: "thread",
+                      threadRef: scopeThreadRef(projectRef.environmentId, threadId),
+                    })
+                  }
+                />
+              ) : null}
+            </div>
+            {!compact && !expanded && controlVisible ? (
+              <div
+                role="separator"
+                aria-label="Resize document pane"
+                aria-orientation="vertical"
+                className="absolute inset-y-0 -left-1 z-20 w-2 cursor-col-resize"
+                {...documentWidth.handlers}
+              />
+            ) : null}
+          </section>
+        </div>
       </div>
     </MonarchDockContext>
   );

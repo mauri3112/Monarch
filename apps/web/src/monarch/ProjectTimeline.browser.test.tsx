@@ -1,6 +1,6 @@
 import { ProjectId, type MonarchTimelineEvent } from "@t3tools/contracts";
 import { expect, it, vi } from "vite-plus/test";
-import { userEvent } from "vite-plus/test/browser";
+import { page, userEvent } from "vite-plus/test/browser";
 
 import { render } from "../../test/render";
 import { ProjectTimeline } from "./ProjectTimeline";
@@ -213,7 +213,10 @@ it("keeps continuous project and work spines centered through dates, compact lay
 
 it("opens events on click and Enter while arrow navigation only selects", async () => {
   const onOpenEvent = vi.fn();
-  const events = [event({}), event({ id: "next", title: "Next work" })];
+  const events = [
+    event({ detail: "Restore the last saved draft." }),
+    event({ id: "next", title: "Next work", detail: "Run the keyboard check." }),
+  ];
   await using screen = await render(
     <div style={{ width: 500, height: 500 }}>
       <ProjectTimeline
@@ -225,7 +228,18 @@ it("opens events on click and Enter while arrow navigation only selects", async 
     // Opening an event is delegated to the parent; the renderer has no route dependency.
     { router: false },
   );
-  await userEvent.click(screen.getByRole("button", { name: /Check recovery\. Thread started/ }));
+  const first = screen.getByRole("button", { name: /Check recovery\. Thread started/ });
+  const next = screen.getByRole("button", { name: /Next work\. Thread started/ });
+  const preview = page.getByRole("tooltip");
+  await userEvent.hover(first);
+  await expect.element(preview).toHaveTextContent("Restore the last saved draft.");
+  await expect.element(first).toHaveAccessibleDescription("Restore the last saved draft.");
+  await userEvent.hover(next);
+  await expect.element(preview).toHaveTextContent("Run the keyboard check.");
+  await userEvent.keyboard("{Escape}");
+  await expect.element(preview).not.toBeInTheDocument();
+  expect(onOpenEvent).not.toHaveBeenCalled();
+  await userEvent.click(first);
   expect(onOpenEvent).toHaveBeenCalledTimes(1);
   await userEvent.keyboard("{ArrowDown}");
   expect(onOpenEvent).toHaveBeenCalledTimes(1);

@@ -7,10 +7,17 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ComponentProps,
   type KeyboardEvent,
   type ReactNode,
 } from "react";
 
+import {
+  Tooltip,
+  TooltipPopup,
+  TooltipScrollDismissArea,
+  TooltipTrigger,
+} from "../components/ui/tooltip";
 import { observeResize } from "../lib/observeResize";
 import { timelineWires, type TimelineMarkerPoint } from "./projectTimelineGeometry";
 import styles from "./ProjectTimeline.module.css";
@@ -150,6 +157,41 @@ function inlineTransition(event: MonarchTimelineEvent) {
   return event.action;
 }
 
+function TimelineEventPreviews({
+  children,
+  boundary,
+  popupId,
+  ...props
+}: ComponentProps<"div"> & { boundary: HTMLDivElement | null; popupId: string }) {
+  return (
+    <TooltipScrollDismissArea {...props}>
+      <Tooltip<{ detail: string; connections: string }>>
+        {({ payload }) => (
+          <>
+            {children}
+            {payload && (
+              <TooltipPopup
+                id={popupId}
+                role="tooltip"
+                className="pointer-events-auto"
+                sideOffset={2}
+                portalContainer={boundary}
+              >
+                <div className={styles["project-timeline-preview"]}>
+                  {payload.detail && <p className="line-clamp-4">{payload.detail}</p>}
+                  {payload.connections && (
+                    <p className="line-clamp-3 text-muted-foreground">{payload.connections}</p>
+                  )}
+                </div>
+              </TooltipPopup>
+            )}
+          </>
+        )}
+      </Tooltip>
+    </TooltipScrollDismissArea>
+  );
+}
+
 export interface ProjectTimelineProps {
   timeline: MonarchTimelineResult;
   selectedNodeId?: string | null;
@@ -188,7 +230,7 @@ export function ProjectTimeline({
     pins: new Map<string, TimelineMarkerPoint>(),
   });
   const graphRef = useRef<HTMLDivElement>(null);
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState<HTMLDivElement | null>(null);
   const axisRef = useRef<HTMLDivElement>(null);
   const projectRailRef = useRef<HTMLSpanElement>(null);
   const rootRef = useRef<HTMLElement>(null);
@@ -196,6 +238,7 @@ export function ProjectTimeline({
   const initiallyPositioned = useRef(false);
   const headingId = useId();
   const keyboardHelpId = useId();
+  const previewId = useId();
   const selectedId = selectedNodeId === undefined ? localSelected : selectedNodeId;
   const selected = timeline.events.find((event) => event.id === selectedId) ?? null;
   const selectedEventId = selected?.id;
@@ -241,10 +284,12 @@ export function ProjectTimeline({
     select(currentEvent);
     const marker = markers.current.get(currentEvent.id);
     marker?.closest("button")?.focus({ preventScroll: true });
-    const viewport = scrollRef.current;
     if (marker && viewport) {
       const bounds = viewport.getBoundingClientRect();
-      viewport.scrollTop += marker.getBoundingClientRect().top - bounds.top - bounds.height * 0.3;
+      viewport.scrollBy({
+        top: marker.getBoundingClientRect().top - bounds.top - bounds.height * 0.3,
+        behavior: "instant",
+      });
     }
   }
 
@@ -309,28 +354,30 @@ export function ProjectTimeline({
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Initially positions the DOM viewport at current activity rather than old history.
   useLayoutEffect(() => {
-    const viewport = scrollRef.current;
     const marker = currentEventId ? markers.current.get(currentEventId) : null;
     if (initiallyPositioned.current || !viewport || !marker) return;
     initiallyPositioned.current = true;
     if (selectedEventId) return;
     const bounds = viewport.getBoundingClientRect();
-    viewport.scrollTop += marker.getBoundingClientRect().top - bounds.top - bounds.height * 0.3;
-  }, [currentEventId, selectedEventId, markers]);
+    viewport.scrollBy({
+      top: marker.getBoundingClientRect().top - bounds.top - bounds.height * 0.3,
+      behavior: "instant",
+    });
+  }, [viewport, currentEventId, selectedEventId, markers]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Keeps the scroll viewport on the selected event when selection comes from the project overview.
   useLayoutEffect(() => {
-    const viewport = scrollRef.current;
     const marker = selectedEventId ? markers.current.get(selectedEventId) : null;
     if (!viewport || !marker) return;
     const bounds = viewport.getBoundingClientRect();
     const event = marker.closest("button")?.getBoundingClientRect();
     if (!event) return;
     const visibleTop = bounds.top + (axisRef.current?.offsetHeight ?? 0) + 8;
-    if (event.top < visibleTop) viewport.scrollTop += event.top - visibleTop;
+    if (event.top < visibleTop)
+      viewport.scrollBy({ top: event.top - visibleTop, behavior: "instant" });
     else if (event.bottom > bounds.bottom - 8)
-      viewport.scrollTop += event.bottom - bounds.bottom + 8;
-  }, [selectedEventId, markers]);
+      viewport.scrollBy({ top: event.bottom - bounds.bottom + 8, behavior: "instant" });
+  }, [viewport, selectedEventId, markers]);
 
   // oxlint-disable-next-line t3code/no-unreasoned-state-sync -- Keeps working animations in step with document and viewport visibility.
   useEffect(() => {
@@ -360,7 +407,6 @@ export function ProjectTimeline({
       style={{ "--timeline-zoom": zoom } as CSSProperties}
     >
       <div className={styles["project-timeline-toolbar"]}>
-        <span>{timeline.hasOlder ? "Recent activity · oldest first" : "Oldest to newest"}</span>
         <div className={styles["project-timeline-zoom"]} aria-label="Timeline size">
           {timeline.hasOlder && onLoadOlder ? (
             <button type="button" onClick={onLoadOlder} disabled={loadingOlder}>
@@ -391,9 +437,11 @@ export function ProjectTimeline({
           </button>
         </div>
       </div>
-      <div
-        ref={scrollRef}
-        className={styles["project-timeline-scroll"]}
+      <TimelineEventPreviews
+        ref={setViewport}
+        boundary={viewport}
+        popupId={previewId}
+        data-timeline-viewport
         role="group"
         aria-label="Timeline events"
         aria-describedby={keyboardHelpId}
@@ -463,6 +511,10 @@ export function ProjectTimeline({
             ]
               .filter(Boolean)
               .join(" ");
+            const detail =
+              event.detail.length > 240
+                ? `${event.detail.slice(0, 240).trimEnd()}…`
+                : event.detail.trim();
             return (
               <div key={event.id}>
                 {!previous || eventDay(previous) !== day ? (
@@ -488,9 +540,19 @@ export function ProjectTimeline({
                       </>
                     ) : null}
                   </time>
-                  <button
-                    type="button"
-                    className={styles["project-timeline-event"]}
+                  <TooltipTrigger
+                    delay={0}
+                    closeDelay={0}
+                    disabled={!detail && !description}
+                    payload={{ detail, connections: description }}
+                    render={(props, state) => (
+                      <button
+                        {...props}
+                        type="button"
+                        className={styles["project-timeline-event"]}
+                        aria-describedby={state.open ? previewId : undefined}
+                      />
+                    )}
                     data-family={event.family}
                     data-state={event.state}
                     data-selected={isSelected || undefined}
@@ -498,7 +560,7 @@ export function ProjectTimeline({
                     tabIndex={event.id === keyboardAnchorId ? 0 : -1}
                     aria-pressed={isSelected}
                     aria-label={`${FAMILY_LABEL[event.family]}: ${event.title}. ${event.action}. ${caption}${date ? `. ${fullDateFormatter.format(date)}` : ""}`}
-                    aria-description={description || undefined}
+                    aria-description={[detail, description].filter(Boolean).join(" ") || undefined}
                     aria-controls={isSelected && showDetails ? headingId : undefined}
                     onClick={() => {
                       select(event);
@@ -526,24 +588,14 @@ export function ProjectTimeline({
                       {transition.trim().toLowerCase() !== event.title.trim().toLowerCase() ? (
                         <span className={styles["project-timeline-action"]}>{transition}</span>
                       ) : null}
-                      <span className={styles["project-timeline-subtitle"]}>
-                        {event.detail.length > 240
-                          ? `${event.detail.slice(0, 240).trimEnd()}…`
-                          : event.detail}
-                        {description && (
-                          <span className={styles["project-timeline-related-note"]}>
-                            {description}
-                          </span>
-                        )}
-                      </span>
                     </span>
-                  </button>
+                  </TooltipTrigger>
                 </div>
               </div>
             );
           })}
         </div>
-      </div>
+      </TimelineEventPreviews>
       <div className={styles["project-timeline-legend"]} aria-label="Timeline symbols">
         {(Object.keys(FAMILY_LABEL) as (keyof typeof FAMILY_LABEL)[]).map((family) => (
           <span key={family} data-family={family}>

@@ -10,13 +10,7 @@ import type {
 } from "@t3tools/client-runtime/state/models";
 import type { ScopedProjectRef, ScopedThreadRef } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import {
-  ArrowUpRightIcon,
-  BookOpenIcon,
-  GitBranchIcon,
-  PlusIcon,
-  ActivityIcon,
-} from "lucide-react";
+import { ArrowUpRightIcon, BookOpenIcon, GitBranchIcon, PlusIcon } from "lucide-react";
 import { lazy, Suspense, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
@@ -152,11 +146,6 @@ export function ProjectBoard({
           >
             <BookOpenIcon /> Project context
           </Button>
-          {dock ? (
-            <Button variant="outline" onClick={() => dock.open("timeline")}>
-              <ActivityIcon /> Timeline
-            </Button>
-          ) : null}
           {actions}
         </div>
         {startError ? (
