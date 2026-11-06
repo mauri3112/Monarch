@@ -40,6 +40,7 @@ describe("RPC authorization scopes", () => {
       WS_METHODS.monarchContextGet,
       WS_METHODS.monarchContinuityActivity,
       WS_METHODS.monarchTimelineHistory,
+      WS_METHODS.monarchJournalSubscribe,
       WS_METHODS.monarchTimelineSubscribe,
       WS_METHODS.monarchContinuitySubscribe,
       WS_METHODS.monarchContinuitySources,

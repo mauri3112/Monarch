@@ -44,6 +44,7 @@ import * as TestClock from "effect/testing/TestClock";
 import * as GitWorkflow from "../git/GitWorkflowService.ts";
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ProjectStore from "./ProjectStore.ts";
+import { reservedSuggestionErrorMessage } from "../monarch/SuggestionEligibility.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProjectSetupScriptRunner from "../project/ProjectSetupScriptRunner.ts";
 import * as ManagedProjectFolders from "../project/ManagedProjectFolders.ts";
@@ -323,6 +324,112 @@ function launchInput(input: {
     creationSource: "web" as const,
   };
 }
+
+it.effect(
+  "checks a reserved suggestion again when the native composer first launches its thread",
+  () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+      const launches = yield* ThreadLaunch.ThreadLaunchService;
+      const threads = yield* ThreadManagement.ThreadManagementService;
+      const input = launchInput({
+        command: "send-reserved",
+        thread: "reserved-draft",
+        message: "Edited locally",
+      });
+      const now = "2026-11-06T13:00:00.000Z";
+      yield* sql`INSERT INTO projection_projects(project_id,title,workspace_root,scripts_json,created_at,updated_at)
+      VALUES(${projectId},'Project','/test','[]',${now},${now})`;
+      const proposal = {
+        id: "proposal",
+        projectId,
+        title: "Repair",
+        prompt: "Repair it",
+        rationale: "",
+        targets: [],
+        sourceThreadIds: [],
+        status: "dismissed",
+        revision: 2,
+        usedThreadId: null,
+        draftThreadId: input.threadId,
+        createdAt: now,
+        updatedAt: now,
+      };
+      yield* sql`INSERT INTO monarch_suggestions(id,project_id,revision,payload_json) VALUES('proposal',${projectId},2,${JSON.stringify(proposal)})`;
+      const denied = yield* launches.launch(input).pipe(Effect.result);
+      assert.isTrue(Result.isFailure(denied));
+      if (Result.isFailure(denied))
+        assert.include(reservedSuggestionErrorMessage(denied.failure) ?? "", "no longer active");
+      assert.isNull(yield* threads.getThreadShell(input.threadId));
+      yield* sql`UPDATE monarch_suggestions SET payload_json=json_set(payload_json,'$.status','suggested') WHERE id='proposal'`;
+      const wrongProject = yield* launches
+        .launch({ ...input, projectId: otherProjectId })
+        .pipe(Effect.result);
+      assert.isTrue(Result.isFailure(wrongProject));
+      assert.isNull(yield* threads.getThreadShell(input.threadId));
+      yield* sql`UPDATE projection_projects SET archived_at=${now} WHERE project_id=${projectId}`;
+      assert.isTrue(Result.isFailure(yield* launches.launch(input).pipe(Effect.result)));
+      yield* sql`UPDATE projection_projects SET archived_at=NULL WHERE project_id=${projectId}`;
+      yield* sql`UPDATE monarch_suggestions SET payload_json=json_set(payload_json,'$.contextRevision',12) WHERE id='proposal'`;
+      const stale = yield* launches.launch(input).pipe(Effect.result);
+      assert.isTrue(Result.isFailure(stale));
+      if (Result.isFailure(stale))
+        assert.include(reservedSuggestionErrorMessage(stale.failure) ?? "", "context changed");
+      assert.isNull(yield* threads.getThreadShell(input.threadId));
+      yield* sql`UPDATE monarch_suggestions SET payload_json=json_remove(payload_json,'$.contextRevision') WHERE id='proposal'`;
+      const source = yield* launches.launch(
+        launchInput({ command: "ordinary-source", thread: "source" }),
+      );
+      yield* sql`UPDATE monarch_suggestions SET payload_json=json_set(payload_json,'$.sourceThreadIds',json_array(${source.threadId})) WHERE id='proposal'`;
+      yield* sql`INSERT INTO monarch_project_context(project_id,settings_json) VALUES(${projectId},json_object('excludedThreadIds',json_array(${source.threadId})))`;
+      const excluded = yield* launches.launch(input).pipe(Effect.result);
+      assert.isTrue(Result.isFailure(excluded));
+      if (Result.isFailure(excluded))
+        assert.include(
+          reservedSuggestionErrorMessage(excluded.failure) ?? "",
+          "source is excluded",
+        );
+      assert.isNull(yield* threads.getThreadShell(input.threadId));
+      yield* sql`UPDATE monarch_project_context SET settings_json=json_object('excludedThreadIds',json_array()) WHERE project_id=${projectId}`;
+      const empty = yield* launches.launch(
+        launchInput({ command: "reserve-empty", thread: input.threadId }),
+      );
+      const firstMessage = {
+        type: "message.dispatch" as const,
+        commandId: CommandId.make("try-first-message"),
+        threadId: empty.threadId,
+        messageId: MessageId.make("first-message"),
+        text: "Edited locally",
+        attachments: [],
+        dispatchMode: { type: "defer_start" as const },
+        createdBy: "user" as const,
+        creationSource: "web" as const,
+      };
+      yield* sql`UPDATE monarch_suggestions SET payload_json=json_set(payload_json,'$.status','dismissed') WHERE id='proposal'`;
+      const lateRejection = yield* threads.dispatch(firstMessage).pipe(Effect.result);
+      assert.isTrue(Result.isFailure(lateRejection));
+      assert.lengthOf((yield* threads.getThreadProjection(input.threadId)).messages, 0);
+      yield* sql`UPDATE monarch_suggestions SET payload_json=json_set(payload_json,'$.status','suggested') WHERE id='proposal'`;
+      yield* threads.dispatch({ ...firstMessage, commandId: CommandId.make("send-first-message") });
+      assert.equal(
+        (yield* threads.getThreadProjection(input.threadId)).messages[0]?.text,
+        "Edited locally",
+      );
+      const [saved] = yield* sql<{
+        status: string;
+      }>`SELECT json_extract(payload_json,'$.status') status FROM monarch_suggestions WHERE id='proposal'`;
+      assert.equal(saved?.status, "used");
+      yield* threads.dispatch({
+        ...firstMessage,
+        commandId: CommandId.make("send-followup"),
+        messageId: MessageId.make("followup"),
+        text: "Follow-up",
+      });
+      assert.lengthOf((yield* threads.getThreadProjection(input.threadId)).messages, 2);
+    }).pipe(Effect.provide(harness.layer));
+  },
+);
 
 it.effect.each(
   (["new", "existing"] as const).flatMap((target) =>

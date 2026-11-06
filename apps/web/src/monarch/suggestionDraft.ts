@@ -1,8 +1,40 @@
+import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/models";
 import { scopedProjectKey, scopeThreadRef } from "@t3tools/client-runtime/environment";
 import type { ModelSelection, NextThreadSuggestion, ScopedProjectRef } from "@t3tools/contracts";
 
-import { DraftId, useComposerDraftStore } from "../composerDraftStore";
+import { useComposerDraftStore } from "../composerDraftStore";
 import { readThreadShell } from "../state/entities";
+
+import { suggestionDraftId } from "./suggestionDraftIdentity";
+
+export function hasSuggestionMessage(
+  shell: Pick<EnvironmentThreadShell, "latestUserAuthoredMessageAt" | "latestUserMessageAt">,
+) {
+  return Boolean(
+    shell.latestUserAuthoredMessageAt === undefined
+      ? shell.latestUserMessageAt
+      : shell.latestUserAuthoredMessageAt,
+  );
+}
+
+export function updateUneditedSuggestionPrompt(
+  projectRef: ScopedProjectRef,
+  suggestion: NextThreadSuggestion,
+  prompt: string,
+) {
+  const id = suggestionDraftId(projectRef, suggestion.id);
+  const store = useComposerDraftStore.getState();
+  const session = store.getDraftSession(id);
+  if (
+    session &&
+    !session.promotedTo &&
+    session.environmentId === projectRef.environmentId &&
+    session.projectId === projectRef.projectId &&
+    session.threadId === suggestion.draftThreadId &&
+    store.getComposerDraft(id)?.prompt === suggestion.prompt
+  )
+    store.setPrompt(id, prompt);
+}
 
 export function prepareSuggestionDraft(
   projectRef: ScopedProjectRef,
@@ -13,13 +45,14 @@ export function prepareSuggestionDraft(
     throw new Error("This suggestion is not ready for a draft in this project.");
   }
   const threadRef = scopeThreadRef(projectRef.environmentId, suggestion.draftThreadId);
-  if (suggestion.usedThreadId !== null || readThreadShell(threadRef) !== null) {
-    return { kind: "server", threadRef } as const;
-  }
-  // Persisted draft keys with colons are interpreted as legacy environment/thread pairs.
-  const draftId = DraftId.make(
-    `monarch-suggestion-${encodeURIComponent(projectRef.environmentId)}-${encodeURIComponent(suggestion.id)}`,
-  );
+  const shell = readThreadShell(threadRef);
+  if (suggestion.usedThreadId !== null)
+    return {
+      kind: "server",
+      threadRef: scopeThreadRef(projectRef.environmentId, suggestion.usedThreadId),
+    } as const;
+  if (shell && hasSuggestionMessage(shell)) return { kind: "server", threadRef } as const;
+  const draftId = suggestionDraftId(projectRef, suggestion.id);
   const store = useComposerDraftStore.getState();
   const existing = store.getDraftSession(draftId);
   if (existing !== null) {

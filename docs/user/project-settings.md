@@ -78,7 +78,9 @@ branch name remains.
 
 ## Project activity on desktop and web
 
-Open a project and select an item under **Targets**, **Threads**, **Suggested next threads**, or **Scheduled tasks**. Its timeline event opens on the right. Click a shape to inspect the time, source, and actions. The middle lane holds proposals. **Use** prepares a draft. Sending it links the proposal to the new thread in the Work lane.
+Open **Timeline** to see **Project**, **Actions**, and **Work**. A triangle marks a background operation, a square marks a scheduled task, and a star marks a suggested thread. Selecting a thread opens its conversation in a tab to the right of the graph. Selecting an eligible suggestion opens a prefilled, editable draft. The dotted link appears after the first message is sent. Stale suggestions open for review.
+
+Select a saved journal to read its exact revision, model, reasoning effort, source turn and recorded entries. An empty journal explains that the turn produced no reusable material. **Open source thread** opens the original conversation in another tab. Switch tabs to return to an open draft or journal, or use **Timeline** on narrow windows to return to the graph.
 
 To journal completed turns, open **Settings** beside **Suggested next threads**, enable automatic updates, and turn on **Journal completed work**. The journal model starts at Codex GPT-6-Luna with xhigh effort. The suggestion model is a separate choice. To journal earlier work, select the threads in **Project context → Build context**. Re-analysis saves another revision and applies your current journal model.
 

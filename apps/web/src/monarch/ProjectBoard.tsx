@@ -292,6 +292,13 @@ function ProjectThreadCard({
       <ProjectOverviewRow
         dock={dock}
         kind="thread"
+        onOpen={() =>
+          dock.openDocument?.({
+            kind: "thread",
+            threadRef: scopeThreadRef(thread.environmentId, thread.id),
+            title: thread.title || "Untitled thread",
+          })
+        }
         entityId={thread.id}
         title={thread.title || "Untitled thread"}
         subtitle={`${STATUS_LABELS[status]}${thread.branch ? ` · ${thread.branch}` : ""}`}

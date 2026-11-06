@@ -14,13 +14,13 @@ Under **Scheduled tasks**, choose **Add task** and select **Run a prompt** or **
 
 A suggestion task can run daily or weekly in a selected timezone, at an interval, or immediately with **Run now**. Run history records success or failure. After an offline gap, it catches up once.
 
-Suggested next threads show their reasoning, related Targets, and source conversations. **Use** opens an editable draft and leaves sending to you. Reopening that suggestion keeps your draft edits. **Edit** changes the proposed prompt; **Remove** puts it in removed history, where it can be restored. A Target change makes an older suggestion stale until you review its relationship to the new direction. Once you send the draft, its suggestion links to the resulting thread.
+Suggested next threads show their reasoning, related Targets, and source conversations. Open a suggestion to see its prompt in the native thread composer. Sending the first message starts work. Reopening that suggestion keeps your draft edits. **Edit** changes the proposed prompt; **Remove** puts it in removed history, where it can be restored. A Target change makes an older suggestion stale until you review its relationship to the new direction. Once you send the draft, its suggestion links to the resulting thread.
 
 Open **Project context** beside the project title to write a brief and retain architecture notes, decisions, questions, and outcomes. Generated entries cite their source conversations and remain **Reported** until you confirm them. Branch-specific work stays scoped to its branch. You can edit, pin, remove, and restore entries; automatic updates preserve your decisions. The relevant context accompanies subsequent conversations across providers without changing your written prompt.
 
 Open **Settings** beside **Suggested next threads** to enable journaling after work and choose when suggestions refresh. Automatic updates start off. The thread journal model defaults to Codex GPT-6-Luna at xhigh. You can change it independently of the suggestion model. **Project context → Build context** journals selected earlier work. **Refresh now** reviews the available evidence. Exclusions, pause, and daily limits apply.
 
-Open **Timeline** in a project to follow events across the Project and Work lanes. Proposed threads appear between them. Select a shape or an overview item to see its details and available actions. A running thread moves, an open Target is filled, and an archived Target has a check. You can expand or hide the timeline as you work.
+Open **Timeline** in a project. Targets sit in **Project**, reviews, journals, suggestions, and scheduled tasks sit in **Actions**, and conversations sit in **Work**. Select a thread or suggestion to open its conversation tab to the right. Select a saved journal to read that revision and open its source thread. On a narrow window, **Timeline** takes you back to the same graph.
 
 Targets, project context, settings, schedules, run history, and suggestions persist locally. The private plugin's data is not imported automatically.
 

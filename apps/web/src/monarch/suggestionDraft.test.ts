@@ -14,9 +14,12 @@ import {
   useComposerDraftStore,
   partializeComposerDraftStoreState,
 } from "../composerDraftStore";
-import { prepareSuggestionDraft } from "./suggestionDraft";
+import { prepareSuggestionDraft, updateUneditedSuggestionPrompt } from "./suggestionDraft";
 
-vi.mock("../state/entities", () => ({ readThreadShell: () => null }));
+const reads = vi.hoisted(() => ({
+  shell: vi.fn<() => { latestUserMessageAt: string | null } | null>(() => null),
+}));
+vi.mock("../state/entities", () => ({ readThreadShell: reads.shell }));
 
 const environmentId = EnvironmentId.make("planning-environment");
 const projectRef = scopeProjectRef(environmentId, ProjectId.make("planning-project"));
@@ -77,7 +80,13 @@ it("reuses the reserved draft without replacing edits or another project's draft
     store.getComposerDraft(first.draftId)?.modelSelectionByProvider[selection.instanceId]?.model,
   ).toBe("gpt-6.1-sol");
 
+  updateUneditedSuggestionPrompt(projectRef, suggestion, "Revised saved proposal");
+  expect(store.getComposerDraft(first.draftId)?.prompt).toBe("Revised saved proposal");
   store.setPrompt(first.draftId, "My edited prompt survives another Use click.");
+  updateUneditedSuggestionPrompt(projectRef, suggestion, "Another proposed prompt");
+  expect(store.getComposerDraft(first.draftId)?.prompt).toBe(
+    "My edited prompt survives another Use click.",
+  );
   const second = prepareSuggestionDraft(
     projectRef,
     { ...suggestion, prompt: "New generated text" },
@@ -128,4 +137,14 @@ it("navigates to the promoted thread when Use is repeated after submission", () 
     kind: "server",
     threadRef,
   });
+});
+
+it("recovers the proposed prompt when the reserved thread exists but the first message failed", () => {
+  reads.shell.mockReturnValueOnce({ latestUserMessageAt: null });
+  const result = prepareSuggestionDraft(projectRef, suggestion, null);
+  expect(result.kind).toBe("draft");
+  if (result.kind === "draft")
+    expect(useComposerDraftStore.getState().getComposerDraft(result.draftId)?.prompt).toBe(
+      suggestion.prompt,
+    );
 });

@@ -175,6 +175,7 @@ import { dedupeSnapshotBodies } from "@t3tools/shared/orchestrationV2DedupedBodi
 import * as ProjectStore from "./orchestration-v2/ProjectStore.ts";
 import * as ThreadSearch from "./orchestration-v2/ThreadSearch.ts";
 import * as OrchestrationEventStore from "./persistence/OrchestrationEventStore.ts";
+import { reservedSuggestionErrorMessage } from "./monarch/SuggestionEligibility.ts";
 import { userFacingDispatchErrorMessage } from "./orchestration-v2/UserFacingErrors.ts";
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.ts";
@@ -2009,6 +2010,7 @@ export const layerWsRpc = (
         [WS_METHODS.monarchContinuityRefresh]: (input) => monarchSchedules.refresh(input),
         [WS_METHODS.monarchContinuityActivity]: (input) => monarchSchedules.activity(input),
         [WS_METHODS.monarchTimelineHistory]: (input) => monarch.timelineHistory(input),
+        [WS_METHODS.monarchJournalSubscribe]: (input) => monarch.watchJournal(input),
         [WS_METHODS.monarchTimelineSubscribe]: (input) => monarch.watchTimeline(input),
         [WS_METHODS.monarchContinuitySubscribe]: (input) => monarchSchedules.watchActivity(input),
         [WS_METHODS.monarchContinuitySources]: (input) => monarchSchedules.sources(input),
@@ -2289,7 +2291,7 @@ export const layerWsRpc = (
                       new OrchestrationV2ThreadLaunchError({
                         commandId: input.commandId,
                         projectId: input.projectId,
-                        message: "Failed to launch thread",
+                        message: reservedSuggestionErrorMessage(cause) ?? "Failed to launch thread",
                         cause,
                       }),
                     ServerRuntimeStartupError: (cause) =>

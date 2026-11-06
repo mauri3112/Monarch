@@ -40,6 +40,7 @@ type WsRpcMethod = RpcGroup.Rpcs<typeof WsRpcGroup>["_tag"];
 export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.monarchContinuityActivity]: AuthOrchestrationReadScope,
   [WS_METHODS.monarchTimelineHistory]: AuthOrchestrationReadScope,
+  [WS_METHODS.monarchJournalSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.monarchTimelineSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.monarchContinuitySubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.monarchContinuitySources]: AuthOrchestrationReadScope,

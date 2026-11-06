@@ -1,5 +1,39 @@
 import * as Schema from "effect/Schema";
-import { IsoDateTime, ProjectId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import {
+  IsoDateTime,
+  PositiveInt,
+  ProjectId,
+  RunId,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from "./baseSchemas.ts";
+
+import { ModelSelection } from "./modelSelection.ts";
+import { MonarchGeneratedContextEntry } from "./monarchContext.ts";
+
+export const MonarchJournalRef = Schema.Struct({ runId: RunId, revision: PositiveInt });
+export type MonarchJournalRef = typeof MonarchJournalRef.Type;
+export const MonarchJournalInput = Schema.Struct({
+  projectId: ProjectId,
+  ...MonarchJournalRef.fields,
+});
+export type MonarchJournalInput = typeof MonarchJournalInput.Type;
+export const MonarchJournalRecord = Schema.Struct({
+  ...MonarchJournalInput.fields,
+  threadId: ThreadId,
+  threadTitle: Schema.String,
+  reviewRunId: Schema.String,
+  branch: Schema.NullOr(Schema.String),
+  worktreePath: Schema.NullOr(Schema.String),
+  completedAt: IsoDateTime,
+  startedAt: IsoDateTime,
+  recordedAt: IsoDateTime,
+  modelSelection: ModelSelection,
+  entries: Schema.Array(MonarchGeneratedContextEntry),
+});
+export type MonarchJournalRecord = typeof MonarchJournalRecord.Type;
+export const MonarchJournalResult = Schema.Struct({ journal: Schema.NullOr(MonarchJournalRecord) });
+export type MonarchJournalResult = typeof MonarchJournalResult.Type;
 
 const EntityKind = Schema.Literals([
   "target",
@@ -49,6 +83,8 @@ export const MonarchTimelineEvent = Schema.Struct({
     "achieved",
     "paused",
   ]),
+  journalRefs: Schema.optionalKey(Schema.Array(MonarchJournalRef)),
+  modelStage: Schema.optionalKey(Schema.Literals(["journal", "suggestions"])),
   parentIds: Schema.Array(Schema.String),
   threadId: Schema.NullOr(ThreadId),
   runId: Schema.NullOr(Schema.String),

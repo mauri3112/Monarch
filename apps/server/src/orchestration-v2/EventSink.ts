@@ -1,3 +1,4 @@
+import { checkReservedSuggestionLaunch } from "../monarch/SuggestionEligibility.ts";
 import {
   CommandId,
   type OrchestrationV2Run,
@@ -651,6 +652,24 @@ const layerBase: Layer.Layer<
             return { ...existing, committed: false as const, cancelledEffectIds: [] };
           }
 
+          if (input.commandType === "thread.create") {
+            const created = input.events.find((event) => event.type === "thread.created");
+            if (created)
+              yield* checkReservedSuggestionLaunch(sql, created.payload.id, {
+                type: "create",
+                projectId: created.payload.projectId,
+              });
+          } else if (input.commandType === "message.dispatch") {
+            const sent = input.events.find(
+              (event) => event.type === "message.updated" && event.payload.role === "user",
+            );
+            if (sent?.type === "message.updated")
+              yield* checkReservedSuggestionLaunch(sql, sent.threadId, {
+                type: "send",
+                userAuthored: sent.payload.createdBy === "user",
+                at: DateTime.formatIso(input.acceptedAt),
+              });
+          }
           const runId = input.updateDelegatedCompletionOnlyRunId;
           const normalized = yield* normalizeEvents(
             runId === undefined

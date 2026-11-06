@@ -28,7 +28,7 @@ const FAMILY_LABEL = {
   thread: "Thread",
   suggestion: "Proposed thread",
   schedule: "Scheduled task",
-  model: "Model work",
+  model: "Background action",
 } as const;
 
 const STATE_LABEL = {
@@ -78,11 +78,7 @@ function eventDay(event: MonarchTimelineEvent) {
 }
 
 function lane(event: MonarchTimelineEvent) {
-  return event.family === "thread"
-    ? "work"
-    : event.family === "suggestion"
-      ? "proposal"
-      : "project";
+  return event.family === "thread" ? "work" : event.family === "target" ? "project" : "actions";
 }
 
 function inlineTransition(event: MonarchTimelineEvent) {
@@ -99,6 +95,8 @@ export interface ProjectTimelineProps {
   timeline: MonarchTimelineResult;
   selectedNodeId?: string | null;
   onSelectNode?: (event: MonarchTimelineEvent | null) => void;
+  onOpenEvent?: (event: MonarchTimelineEvent) => void;
+  detailPresentation?: (event: MonarchTimelineEvent) => "inline" | "external";
   hoveredEntityKey?: string | null;
   onHoverEntity?: (key: string | null) => void;
   renderActions?: (event: MonarchTimelineEvent) => ReactNode;
@@ -111,6 +109,8 @@ export function ProjectTimeline({
   timeline,
   selectedNodeId,
   onSelectNode,
+  onOpenEvent,
+  detailPresentation,
   hoveredEntityKey,
   onHoverEntity,
   renderActions,
@@ -135,6 +135,7 @@ export function ProjectTimeline({
   const selected = timeline.events.find((event) => event.id === selectedId) ?? null;
   const selectedEventId = selected?.id;
   const selectedDate = selected ? parsedDate(selected.at) : null;
+  const showDetails = selected ? detailPresentation?.(selected) !== "external" : !onOpenEvent;
   const selectedOwner = selected ? timelineEntityKey(selected) : null;
   const hoveredOwner = hoveredEntityKey ?? localHover;
   const currentEvent =
@@ -198,6 +199,7 @@ export function ProjectTimeline({
     const measure = () => {
       const bounds = graph.getBoundingClientRect();
       const positions = new Map<string, TimelineMarkerPoint>();
+      const railGap = rows[0] ? Number.parseFloat(getComputedStyle(rows[0]).columnGap) || 7 : 7;
       for (const [id, marker] of markers.current) {
         const rect = marker.getBoundingClientRect();
         const row = marker.closest("[data-timeline-row]")?.getBoundingClientRect();
@@ -210,6 +212,7 @@ export function ProjectTimeline({
           rowBottom: row.bottom - bounds.top,
           radius: rect.width / 2,
           labelGap: Math.max(0, label.left - rect.right),
+          railGap,
         });
       }
       setGeometry({
@@ -330,12 +333,12 @@ export function ProjectTimeline({
         >
           <span />
           <span>Project</span>
-          <span>Suggestions</span>
+          <span>Actions</span>
           <span>Work</span>
         </div>
         <p className="sr-only" id={keyboardHelpId}>
           Use Up and Down arrow keys to move between events. Home and End move to the first and last
-          event. Select an event to see its details below the graph.
+          event. Press Enter to open the selected event.
         </p>
         <div className={styles["project-timeline-canvas"]} ref={graphRef} data-timeline-canvas>
           {timeline.events.length > 0 && (
@@ -424,8 +427,11 @@ export function ProjectTimeline({
                     tabIndex={event.id === keyboardAnchorId ? 0 : -1}
                     aria-pressed={isSelected}
                     aria-label={`${FAMILY_LABEL[event.family]}: ${event.title}. ${event.action}. ${caption}${date ? `. ${fullDateFormatter.format(date)}` : ""}`}
-                    aria-controls={isSelected ? headingId : undefined}
-                    onClick={() => select(event)}
+                    aria-controls={isSelected && showDetails ? headingId : undefined}
+                    onClick={() => {
+                      select(event);
+                      onOpenEvent?.(event);
+                    }}
                     onKeyDown={(keyEvent) => navigate(keyEvent, index)}
                     onMouseEnter={() => hover(event)}
                     onMouseLeave={() => hover(null)}
@@ -475,41 +481,43 @@ export function ProjectTimeline({
         ))}
         <span className={styles["project-timeline-return-key"]}>Dotted path: sent to thread</span>
       </div>
-      <div className={styles["project-timeline-details"]} id={headingId}>
-        {selected ? (
-          <>
-            <div className={styles["project-timeline-details-heading"]}>
-              <div>
-                <span className={styles["project-timeline-details-kind"]}>
-                  {FAMILY_LABEL[selected.family]} · {STATE_LABEL[selected.state]}
-                </span>
-                <h3>{selected.title}</h3>
-                {selected.action.trim().toLowerCase() !== selected.title.trim().toLowerCase() ? (
-                  <span className={styles["project-timeline-selected-action"]}>
-                    {selected.action}
+      {showDetails ? (
+        <div className={styles["project-timeline-details"]} id={headingId}>
+          {selected ? (
+            <>
+              <div className={styles["project-timeline-details-heading"]}>
+                <div>
+                  <span className={styles["project-timeline-details-kind"]}>
+                    {FAMILY_LABEL[selected.family]} · {STATE_LABEL[selected.state]}
                   </span>
-                ) : null}
+                  <h3>{selected.title}</h3>
+                  {selected.action.trim().toLowerCase() !== selected.title.trim().toLowerCase() ? (
+                    <span className={styles["project-timeline-selected-action"]}>
+                      {selected.action}
+                    </span>
+                  ) : null}
+                </div>
+                <button
+                  type="button"
+                  aria-label="Clear timeline selection"
+                  onClick={() => select(null)}
+                >
+                  <XIcon aria-hidden="true" />
+                </button>
               </div>
-              <button
-                type="button"
-                aria-label="Clear timeline selection"
-                onClick={() => select(null)}
-              >
-                <XIcon aria-hidden="true" />
-              </button>
-            </div>
-            <p>{selected.detail}</p>
-            {selectedDate ? (
-              <time dateTime={selected.at ?? undefined}>
-                {fullDateFormatter.format(selectedDate)}
-              </time>
-            ) : null}
-            <div className={styles["project-timeline-actions"]}>{renderActions?.(selected)}</div>
-          </>
-        ) : (
-          <p>Select an event for details and actions.</p>
-        )}
-      </div>
+              <p>{selected.detail}</p>
+              {selectedDate ? (
+                <time dateTime={selected.at ?? undefined}>
+                  {fullDateFormatter.format(selectedDate)}
+                </time>
+              ) : null}
+              <div className={styles["project-timeline-actions"]}>{renderActions?.(selected)}</div>
+            </>
+          ) : (
+            <p>Select an event for details and actions.</p>
+          )}
+        </div>
+      ) : null}
     </section>
   );
 }

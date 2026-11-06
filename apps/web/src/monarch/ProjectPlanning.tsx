@@ -1,4 +1,7 @@
 import { ProjectOverviewRow } from "./ProjectOverviewRow";
+import { ProjectSuggestionTab } from "./ProjectSuggestionTab";
+import { suggestionReviewReasons } from "./suggestionReview";
+import { hasSuggestionMessage, updateUneditedSuggestionPrompt } from "./suggestionDraft";
 import { useAtomValue } from "@effect/atom-react";
 import {
   isAtomCommandInterrupted,
@@ -62,10 +65,17 @@ export function ProjectPlanning({
   archived: boolean;
   children?: ReactNode;
 }) {
+  const dock = useMonarchDock();
+  const activeDocument = dock?.activeDocument;
+  const documentSuggestionId =
+    activeDocument && "suggestionId" in activeDocument ? activeDocument.suggestionId : undefined;
   const query = useEnvironmentQuery(
     monarchEnvironment.projectState({
       environmentId: projectRef.environmentId,
-      input: { projectId: projectRef.projectId },
+      input: {
+        projectId: projectRef.projectId,
+        ...(documentSuggestionId ? { focusSuggestionId: documentSuggestionId } : {}),
+      },
     }),
   );
   const contextQuery = useEnvironmentQuery(
@@ -101,7 +111,6 @@ export function ProjectPlanning({
   const [editingTarget, setEditingTarget] = useState<MonarchTarget | "new" | null>(null);
   const [editingSuggestion, setEditingSuggestion] = useState<NextThreadSuggestion | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const dock = useMonarchDock();
   const [scheduleEditor, setScheduleEditor] = useState<MonarchReviewSchedule | "new" | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -139,7 +148,7 @@ export function ProjectPlanning({
           thread.projectId === projectId &&
           thread.id === item.draftThreadId,
       );
-      if (!shell) continue;
+      if (!shell || !hasSuggestionMessage(shell)) continue;
       const key = `${item.id}:${item.revision}`;
       if (usedAcknowledgements.current.has(key)) continue;
       usedAcknowledgements.current.add(key);
@@ -232,6 +241,7 @@ export function ProjectPlanning({
       if (!isAtomCommandInterrupted(result)) setError(String(squashAtomCommandFailure(result)));
       return;
     }
+    updateUneditedSuggestionPrompt(projectRef, editingSuggestion, input.prompt);
     setEditingSuggestion(null);
     query.refresh();
   }
@@ -256,6 +266,13 @@ export function ProjectPlanning({
       if (!isAtomCommandInterrupted(result)) setError(String(squashAtomCommandFailure(result)));
       return;
     }
+    if (
+      status === "dismissed" &&
+      dock?.activeDocument &&
+      "suggestionId" in dock.activeDocument &&
+      dock.activeDocument.suggestionId === item.id
+    )
+      dock.closeDocument?.();
     query.refresh();
   }
 
@@ -263,47 +280,18 @@ export function ProjectPlanning({
     dock?.selection?.entityKind === "target"
       ? query.data?.targets.find((target) => target.id === dock.selection?.entityId)
       : null;
-  const selectedSuggestion =
-    dock?.selection?.entityKind === "suggestion"
-      ? query.data?.suggestions.find((item) => item.id === dock.selection?.entityId)
-      : null;
-  const selectedSuggestionStale =
-    selectedSuggestion?.targets.some(
-      (ref) => targetById.get(ref.targetId)?.revision !== ref.revision,
-    ) ||
-    (selectedSuggestion?.contextRevision !== undefined &&
-      selectedSuggestion.contextRevision !== contextQuery.data?.revision);
-
-  const selectedSuggestionCauses: string[] = [];
-  for (const ref of selectedSuggestion?.targets ?? []) {
-    const currentTarget = query.data?.targets.find((target) => target.id === ref.targetId);
-    if (!currentTarget) {
-      if (!selectedSuggestionCauses.includes("A referenced Target is unavailable."))
-        selectedSuggestionCauses.push("A referenced Target is unavailable.");
-    } else if (currentTarget.status === "archived") {
-      selectedSuggestionCauses.push(`Target “${currentTarget.title}” is archived.`);
-    } else if (currentTarget.revision !== ref.revision)
-      selectedSuggestionCauses.push(
-        `Target “${currentTarget.title}” changed from revision ${ref.revision} to ${currentTarget.revision}.`,
-      );
-  }
-  if (
-    selectedSuggestion?.contextRevision !== undefined &&
-    selectedSuggestion.contextRevision !== contextQuery.data?.revision
-  ) {
-    selectedSuggestionCauses.push(
-      contextQuery.data
-        ? `Project context changed from revision ${selectedSuggestion.contextRevision} to ${contextQuery.data.revision}.`
-        : "Current project context is still loading.",
-    );
-  }
-  if (
-    selectedSuggestion?.sourceThreadIds.some((id) =>
-      contextQuery.data?.settings.excludedThreadIds.includes(id),
-    )
-  ) {
-    selectedSuggestionCauses.push("A source thread is now excluded from project reviews.");
-  }
+  const documentSuggestion = documentSuggestionId
+    ? query.data?.suggestions.find((item) => item.id === documentSuggestionId)
+    : undefined;
+  const documentReasons = documentSuggestion
+    ? suggestionReviewReasons(documentSuggestion, query.data?.targets ?? [], contextQuery.data)
+    : [];
+  const openSuggestion = (item: NextThreadSuggestion) =>
+    dock?.openDocument?.({
+      kind: "suggestion",
+      suggestionId: item.id,
+      title: item.title,
+    });
 
   async function changeTargetStatus(item: MonarchTarget, status: MonarchTargetStatus) {
     setBusyId(item.id);
@@ -381,85 +369,114 @@ export function ProjectPlanning({
                   </div>
                 </>
               ) : null}
-              {selectedSuggestion ? (
-                <>
-                  {selectedSuggestion.status === "suggested" ? (
-                    <>
-                      <Button
-                        size="xs"
-                        disabled={
-                          !canEdit ||
-                          selectedSuggestionStale ||
-                          draft.preparingId === selectedSuggestion.id
-                        }
-                        onClick={() => void draft.prepare(selectedSuggestion)}
-                      >
-                        {selectedSuggestion.draftThreadId ? "Continue draft" : "Use"}
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="outline"
-                        disabled={!canEdit}
-                        onClick={() => setEditingSuggestion(selectedSuggestion)}
-                      >
-                        Edit
-                      </Button>
-                      <Button
-                        size="xs"
-                        variant="ghost-muted"
-                        disabled={!canEdit || busyId === selectedSuggestion.id}
-                        onClick={() => void changeSuggestionStatus(selectedSuggestion, "dismissed")}
-                      >
-                        Remove
-                      </Button>
-                    </>
-                  ) : selectedSuggestion.status === "dismissed" ? (
-                    <Button
-                      size="xs"
-                      variant="outline"
-                      disabled={!canEdit}
-                      onClick={() => void changeSuggestionStatus(selectedSuggestion, "suggested")}
-                    >
-                      Restore suggestion
-                    </Button>
-                  ) : null}
-                  <div
-                    className="mt-2 max-h-36 w-full overflow-y-auto border-t border-border pt-2 text-xs leading-relaxed"
-                    aria-label="Current proposal material"
-                  >
-                    <p className="text-2xs text-muted-foreground">
-                      Current saved proposal · Revision {selectedSuggestion.revision} ·{" "}
-                      {selectedSuggestion.status}
-                    </p>
-                    <h4 className="mt-1 font-medium">{selectedSuggestion.title}</h4>
-                    {selectedSuggestion.rationale ? (
-                      <p className="mt-1 whitespace-pre-wrap break-words">
-                        {selectedSuggestion.rationale}
-                      </p>
-                    ) : null}
-                    {selectedSuggestionCauses.length ? (
-                      <div
-                        className="mt-2 space-y-1 text-warning-foreground"
-                        aria-label="Proposal review reasons"
-                      >
-                        {selectedSuggestionCauses.map((cause) => (
-                          <p key={cause}>{cause}</p>
-                        ))}
-                      </div>
-                    ) : null}
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-muted-foreground">
-                        Current prompt
-                      </summary>
-                      <p className="mt-1 whitespace-pre-wrap break-words">
-                        {selectedSuggestion.prompt}
-                      </p>
-                    </details>
-                  </div>
-                </>
-              ) : null}
             </>,
             dock.actionHost,
+          )
+        : null}
+      {documentSuggestionId && dock?.documentHost
+        ? createPortal(
+            documentSuggestion ? (
+              <ProjectSuggestionTab
+                key={documentSuggestion.id}
+                suggestion={documentSuggestion}
+                references={
+                  (documentSuggestion.targets.length > 0 ||
+                    documentSuggestion.sourceThreadIds.length > 0) && (
+                    <div className="flex flex-wrap gap-1" aria-label="Suggestion sources">
+                      {documentSuggestion.targets.map((ref) => {
+                        const target = query.data?.targets.find((t) => t.id === ref.targetId);
+                        return target ? (
+                          <Button
+                            key={target.id}
+                            size="xs"
+                            variant="ghost-muted"
+                            onClick={() =>
+                              dock.selectEntity?.({ entityKind: "target", entityId: target.id })
+                            }
+                          >
+                            Target · {target.title}
+                          </Button>
+                        ) : null;
+                      })}
+                      {documentSuggestion.sourceThreadIds
+                        .filter((id) => !contextQuery.data?.settings.excludedThreadIds.includes(id))
+                        .map((id) => {
+                          const threadRef = scopeThreadRef(projectRef.environmentId, id);
+                          const title =
+                            threadShells.find(
+                              (t) =>
+                                t.environmentId === projectRef.environmentId &&
+                                t.projectId === projectRef.projectId &&
+                                t.id === id,
+                            )?.title ?? "Source thread";
+                          return (
+                            <Button
+                              key={id}
+                              size="xs"
+                              variant="ghost-muted"
+                              onClick={() => {
+                                dock.selectEntity?.({ entityKind: "thread", entityId: id });
+                                dock.openDocument?.({ kind: "thread", threadRef, title });
+                              }}
+                            >
+                              Source · {title}
+                            </Button>
+                          );
+                        })}
+                    </div>
+                  )
+                }
+                composerOpen={activeDocument?.kind === "draft" || activeDocument?.kind === "thread"}
+                canEdit={canEdit}
+                busy={busyId === documentSuggestion.id}
+                reasons={documentReasons}
+                onOpen={() => openSuggestion(documentSuggestion)}
+                onEdit={() => {
+                  setError(null);
+                  setEditingSuggestion(documentSuggestion);
+                }}
+                onRemove={() => void changeSuggestionStatus(documentSuggestion, "dismissed")}
+                onRestore={() => void changeSuggestionStatus(documentSuggestion, "suggested")}
+                editor={
+                  editingSuggestion?.id === documentSuggestion.id ? (
+                    <SuggestionEditor
+                      key={editingSuggestion.id}
+                      suggestion={editingSuggestion}
+                      currentTargets={targetById}
+                      targetStale={editingSuggestion.targets.some((ref) => {
+                        const target = targetById.get(ref.targetId);
+                        return target?.status !== "active" || target.revision !== ref.revision;
+                      })}
+                      contextStale={
+                        editingSuggestion.contextRevision !== undefined &&
+                        editingSuggestion.contextRevision !== contextQuery.data?.revision
+                      }
+                      currentContextRevision={contextQuery.data?.revision}
+                      busy={busyId === editingSuggestion.id}
+                      onSave={(value) => void saveSuggestion(value)}
+                      onCancel={() => setEditingSuggestion(null)}
+                    />
+                  ) : null
+                }
+              />
+            ) : (
+              <p role="status" className="p-5 text-sm text-muted-foreground">
+                {query.isPending
+                  ? "Loading suggestion…"
+                  : query.error
+                    ? "Could not read this suggestion."
+                    : "This suggestion is no longer available."}
+              </p>
+            ),
+            dock.documentHost,
+          )
+        : null}
+      {documentSuggestionId && error && dock?.documentHost
+        ? createPortal(
+            <p role="alert" className="px-4 py-2 text-xs text-destructive">
+              {error}
+            </p>,
+            dock.documentHost,
           )
         : null}
       {query.error ? (
@@ -635,7 +652,9 @@ export function ProjectPlanning({
               Suggested next threads
             </h2>
             <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              Use opens a draft for you to edit and send.
+              {dock
+                ? "Open a suggestion to edit its draft and send it."
+                : "Use opens a draft for you to edit and send."}
               {contextQuery.data?.settings.paused
                 ? " Project reviews are paused."
                 : contextQuery.data?.settings.enabled
@@ -679,6 +698,7 @@ export function ProjectPlanning({
                     <ProjectOverviewRow
                       dock={dock}
                       kind="suggestion"
+                      onOpen={() => openSuggestion(item)}
                       entityId={item.id}
                       title={item.title}
                       subtitle={
@@ -693,23 +713,6 @@ export function ProjectPlanning({
                                 : "Suggested"
                       }
                     />
-                    {editingSuggestion?.id === item.id && dock.actionHost
-                      ? createPortal(
-                          <div className="w-full">
-                            <SuggestionEditor
-                              suggestion={item}
-                              currentTargets={targetById}
-                              targetStale={targetStale}
-                              contextStale={contextStale}
-                              currentContextRevision={contextQuery.data?.revision}
-                              busy={busyId === item.id}
-                              onSave={(input) => void saveSuggestion(input)}
-                              onCancel={() => setEditingSuggestion(null)}
-                            />
-                          </div>,
-                          dock.actionHost,
-                        )
-                      : null}
                   </div>
                 );
               return (

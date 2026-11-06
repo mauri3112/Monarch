@@ -1,4 +1,6 @@
 import { createContext, useContext } from "react";
+import type { MonarchProjectDocument } from "./projectDocuments";
+export type { MonarchProjectDocument } from "./projectDocuments";
 
 export type MonarchDockKind = "timeline" | "context" | "settings" | "included";
 
@@ -17,6 +19,11 @@ export interface TimelineSelection {
 }
 
 export interface MonarchDockController {
+  readonly activeDocument?: MonarchProjectDocument | null;
+  readonly documentHost?: HTMLElement | null;
+  readonly openDocument?: (document: MonarchProjectDocument) => void;
+  readonly closeDocument?: () => void;
+  readonly showTimeline?: () => void;
   readonly hoveredEntityKey?: string | null;
   readonly hoverEntity?: (key: string | null) => void;
   readonly selection?: TimelineSelection | null;

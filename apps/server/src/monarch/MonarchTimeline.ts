@@ -1,6 +1,11 @@
+import { confirmedSuggestionSend } from "./SuggestionEligibility.ts";
 import {
   MonarchError,
   MonarchGeneratedContextEntry,
+  type MonarchJournalInput,
+  type MonarchJournalRecord,
+  type MonarchJournalRef,
+  RunId,
   ModelSelection,
   type MonarchTimelineEvent,
   type MonarchTimelineHistoryInput,
@@ -142,7 +147,7 @@ const readWindow = Effect.fn("MonarchTimeline.readWindow")(function* ({
     }>`
       SELECT t.thread_id id,t.title,t.created_at created,t.archived_at archived,
         json_extract(t.payload_json,'$.settledAt') settled,json_extract(t.payload_json,'$.unsettledAt') reopened,
-        (SELECT s.id FROM monarch_suggestions s WHERE s.project_id=t.project_id AND json_extract(s.payload_json,'$.draftThreadId')=t.thread_id LIMIT 1) suggestion,
+        (SELECT s.id FROM monarch_suggestions s WHERE s.project_id=t.project_id AND json_extract(s.payload_json,'$.draftThreadId')=t.thread_id AND ${confirmedSuggestionSend(sql, sql`t.thread_id`)} LIMIT 1) suggestion,
         p.task_id prompt,p.started_at started FROM orchestration_v2_projection_threads t
         LEFT JOIN monarch_prompt_runs p ON p.project_id=t.project_id AND p.thread_id=t.thread_id AND p.created_thread=1
         WHERE t.project_id=${projectId} AND t.deleted_at IS NULL ${focus ? sql`AND t.thread_id=${focus.entityId}` : sql``}
@@ -613,7 +618,100 @@ const requireProject = Effect.fn("MonarchTimeline.requireProject")(function* (
   )
     return yield* new MonarchError({ reason: "not_found" });
 });
-export const readTimelineHistory = Effect.fn("MonarchService.readTimelineHistory")(function* (
+export const readJournal = Effect.fn("MonarchService.readJournal")(function* (
+  input: MonarchJournalInput,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const [row] = yield* sql<
+    Omit<MonarchJournalRecord, "modelSelection" | "entries"> & { model: string; material: string }
+  >`
+    SELECT j.project_id projectId,j.run_id runId,j.revision,j.thread_id threadId,t.title threadTitle,
+      j.review_run_id reviewRunId,j.branch,j.worktree_path worktreePath,j.completed_at completedAt,
+      j.started_at startedAt,j.recorded_at recordedAt,j.model_json model,j.entries_json material
+    FROM monarch_run_journal_revisions j
+    JOIN projection_projects p ON p.project_id=j.project_id AND p.deleted_at IS NULL
+    JOIN orchestration_v2_projection_threads t ON t.project_id=j.project_id AND t.thread_id=j.thread_id AND t.deleted_at IS NULL
+    LEFT JOIN monarch_project_context c ON c.project_id=j.project_id
+    WHERE j.project_id=${input.projectId} AND j.run_id=${input.runId} AND j.revision=${input.revision}
+      AND NOT EXISTS(SELECT 1 FROM json_each(c.settings_json,'$.excludedThreadIds') x WHERE x.value=j.thread_id)`;
+  if (!row) return { journal: null };
+  const { model, material, ...metadata } = row;
+  return {
+    journal: {
+      ...metadata,
+      modelSelection: yield* decodeModel(model),
+      entries: yield* decodeEntries(material),
+    },
+  };
+});
+const withJournalRefs = Effect.fn("MonarchTimeline.withJournalRefs")(function* (
+  projectId: ProjectId,
+  events: ReadonlyArray<Event>,
+) {
+  const sql = yield* SqlClient.SqlClient;
+  const reviews = [
+    ...new Set(
+      events.flatMap((e) =>
+        (e.entityKind === "review" || e.entityKind === "review-schedule") && e.runId
+          ? [e.runId]
+          : [],
+      ),
+    ),
+  ];
+  const refs = new Map<string, Map<string, MonarchJournalRef>>();
+  if (reviews.length) {
+    const rows = yield* sql<{ review: string; stage: string; runId: RunId; revision: number }>`
+      WITH related(review,stage,runId,revision,thread) AS (
+        SELECT s.review_run_id,s.stage,j.run_id,j.revision,j.thread_id
+        FROM monarch_review_stages s CROSS JOIN json_each(s.source_run_ids_json) src
+        CROSS JOIN monarch_run_journal_revisions j ON j.project_id=s.project_id AND j.run_id=src.value AND j.review_run_id=s.review_run_id
+        WHERE s.project_id=${projectId} AND s.review_run_id IN ${sql.in(reviews)} AND s.stage='journal'
+        UNION ALL
+        SELECT s.review_run_id,s.stage,j.run_id,j.revision,j.thread_id
+        FROM monarch_review_stages s CROSS JOIN json_each(s.source_refs_json) src
+        CROSS JOIN monarch_run_journal_revisions j ON j.project_id=s.project_id AND j.run_id=json_extract(src.value,'$.runId')
+          AND j.revision=json_extract(src.value,'$.revision')
+        WHERE s.project_id=${projectId} AND s.review_run_id IN ${sql.in(reviews)} AND s.stage='suggestions'
+      )
+      SELECT r.review,r.stage,r.runId,r.revision FROM related r
+      JOIN orchestration_v2_projection_threads t ON t.project_id=${projectId} AND t.thread_id=r.thread AND t.deleted_at IS NULL
+      LEFT JOIN monarch_project_context c ON c.project_id=t.project_id
+      WHERE NOT EXISTS(SELECT 1 FROM json_each(c.settings_json,'$.excludedThreadIds') x WHERE x.value=r.thread)
+      ORDER BY r.review,r.stage,r.runId,r.revision`;
+    for (const { review, stage, runId, revision } of rows) {
+      for (const key of [reviewEvent(review), `stage:${review}:${stage}`]) {
+        const group = refs.get(key) ?? new Map<string, MonarchJournalRef>();
+        group.set(`${journalEvent(runId)}:${revision}`, { runId, revision });
+        refs.set(key, group);
+      }
+    }
+  }
+  return events.map((event) => {
+    if (event.entityKind === "journal" && event.runId) {
+      const revision = Number(event.id.slice(event.id.lastIndexOf(":") + 1));
+      if (
+        Number.isSafeInteger(revision) &&
+        revision > 0 &&
+        event.id === `${journalEvent(event.runId)}:${revision}`
+      )
+        return { ...event, journalRefs: [{ runId: RunId.make(event.runId), revision }] };
+    }
+    if ((event.entityKind === "review" || event.entityKind === "review-schedule") && event.runId) {
+      const key = event.id.startsWith("stage:") ? event.id : reviewEvent(event.runId);
+      const modelStage = (["journal", "suggestions"] as const).find(
+        (stage) => event.id === `stage:${event.runId}:${stage}`,
+      );
+      return {
+        ...event,
+        ...(modelStage ? { modelStage } : {}),
+        journalRefs: [...(refs.get(key)?.values() ?? [])],
+      };
+    }
+    return event;
+  });
+});
+
+const readHistoryPage = Effect.fn("MonarchTimeline.readHistoryPage")(function* (
   input: MonarchTimelineHistoryInput,
 ) {
   yield* requireProject(input.projectId);
@@ -631,11 +729,17 @@ export const readTimelineHistory = Effect.fn("MonarchService.readTimelineHistory
     nextCursor: rows.length > 40 && oldest?.at ? { at: oldest.at, id: oldest.id } : null,
   };
 });
+export const readTimelineHistory = Effect.fn("MonarchService.readTimelineHistory")(function* (
+  input: MonarchTimelineHistoryInput,
+) {
+  const page = yield* readHistoryPage(input);
+  return { ...page, events: yield* withJournalRefs(input.projectId, page.events) };
+});
 export const readTimeline = Effect.fn("MonarchService.readTimeline")(function* (
   input: MonarchTimelineInput,
 ) {
   const sql = yield* SqlClient.SqlClient;
-  const page = yield* readTimelineHistory({ projectId: input.projectId });
+  const page = yield* readHistoryPage({ projectId: input.projectId });
   const latest = yield* readWindow({ projectId: input.projectId });
   const liveById = new Map(latest.events.map((event) => [event.id, event]));
   const pinned = latest.events
@@ -687,7 +791,10 @@ export const readTimeline = Effect.fn("MonarchService.readTimeline")(function* (
   }
   return {
     projectId: input.projectId,
-    events: [...byId.values()].sort((a, b) => descending(b, a)),
+    events: yield* withJournalRefs(
+      input.projectId,
+      [...byId.values()].sort((a, b) => descending(b, a)),
+    ),
     hasOlder: page.nextCursor !== null,
     nextCursor: page.nextCursor,
     visibilityKey: page.visibilityKey,

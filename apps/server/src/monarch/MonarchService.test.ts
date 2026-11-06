@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import {
   EventId,
   ProjectId,
+  RunId,
   ThreadId,
   type MonarchTarget,
   type NextThreadSuggestion,
@@ -237,15 +238,27 @@ it.layer(testLayer)("Monarch planning", (it) => {
         const source = ThreadId.make("journal-source");
         yield* insertThread(projectId, source);
         const at = "2026-11-05T09:00:00.000Z";
-        const model =
-          '{"instanceId":"codex","model":"luna","options":[{"id":"reasoningEffort","value":"xhigh"}]}';
+        const model = '{"provider":"codex","model":"luna","options":{"reasoningEffort":"xhigh"}}';
         const entries =
           '[{"title":"Choice","body":"Keep the original decision.","kind":"decision","scope":"project","branch":null,"sourceRefs":[{"threadId":"journal-source","runId":"source-run"}],"contradictsEntryIds":[]}]';
         yield* sql`INSERT INTO monarch_run_journals(project_id,run_id,thread_id,completed_at,entries_json,review_run_id,model_json,started_at,recorded_at)
       VALUES(${projectId},'source-run',${source},${at},${entries},'first-review',${model},${at},${at})`;
-        yield* sql`UPDATE monarch_run_journals SET revision=2,entries_json='[]' WHERE project_id=${projectId}`;
+        yield* sql`UPDATE monarch_run_journals SET revision=2,entries_json='[]',review_run_id='second-review' WHERE project_id=${projectId}`;
         yield* sql`INSERT INTO monarch_review_stages(project_id,review_run_id,stage,source_run_ids_json,source_refs_json,model_json,started_at,completed_at,status)
       VALUES(${projectId},'review','suggestions','["source-run"]','[{"runId":"source-run","revision":1}]',${model},${at},${at},'succeeded')`;
+        yield* sql`INSERT INTO monarch_review_stages(project_id,review_run_id,stage,source_run_ids_json,model_json,started_at,completed_at,status)
+          VALUES(${projectId},'first-review','journal','["source-run"]',${model},${at},${at},'succeeded')`;
+        const first = { projectId, runId: RunId.make("source-run"), revision: 1 };
+        const receipt = (yield* service.journal(first)).journal!;
+        assert.equal(receipt.entries[0]?.body, "Keep the original decision.");
+        assert.equal(receipt.threadId, source);
+        assert.deepEqual(receipt.modelSelection.options, [
+          { id: "reasoningEffort", value: "xhigh" },
+        ]);
+        assert.deepEqual((yield* service.journal({ ...first, revision: 2 })).journal?.entries, []);
+        assert.isNull((yield* service.journal({ ...first, revision: 3 })).journal);
+        const foreign = yield* fixture("foreign-journal");
+        assert.isNull((yield* service.journal({ ...first, projectId: foreign.projectId })).journal);
         const input = {
           projectId,
           focus: {
@@ -260,9 +273,36 @@ it.layer(testLayer)("Monarch planning", (it) => {
         assert.include(old.detail, "xhigh");
         assert.equal(old.threadId, source);
         const stage = timeline.events.find((e) => e.id === "stage:review:suggestions")!;
+        const ref = { runId: first.runId, revision: 1 };
+        assert.deepEqual(old.journalRefs, [ref]);
+        assert.deepEqual(stage.journalRefs, [ref]);
+        assert.strictEqual(stage.modelStage, "suggestions");
+        assert.strictEqual(
+          timeline.events.find((e) => e.id === "stage:first-review:journal")?.modelStage,
+          "journal",
+        );
+        assert.deepEqual(
+          timeline.events.find((e) => e.id === "stage:first-review:journal")?.journalRefs,
+          [ref],
+        );
         assert.include(stage.parentIds, old.id);
         assert.notInclude(stage.parentIds, "journal:source-run:2");
+        const opened = yield* Deferred.make<void>();
+        const subscription = yield* service.watchJournal(first).pipe(
+          Stream.tap(() => Deferred.succeed(opened, undefined)),
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.forkChild,
+        );
+        yield* Deferred.await(opened);
         yield* sql`INSERT INTO monarch_project_context(project_id,settings_json) VALUES(${projectId},'{"excludedThreadIds":["journal-source"]}')`;
+        yield* TestClock.adjust("3 seconds");
+        const updates = yield* Fiber.join(subscription);
+        assert.deepEqual(
+          updates.map((u) => u.journal?.revision ?? null),
+          [1, null],
+        );
+        assert.isNull((yield* service.journal(first)).journal);
         assert.notEqual(
           (yield* service.timelineHistory({ projectId })).visibilityKey,
           timeline.visibilityKey,
@@ -270,7 +310,10 @@ it.layer(testLayer)("Monarch planning", (it) => {
 
         assert.isFalse(
           (yield* service.timeline(input)).events.some(
-            (e) => e.entityKind === "journal" || e.parentIds.includes(old.id),
+            (e) =>
+              e.entityKind === "journal" ||
+              e.parentIds.includes(old.id) ||
+              e.journalRefs?.some((link) => link.runId === first.runId),
           ),
         );
         assert.isFalse(
@@ -278,6 +321,12 @@ it.layer(testLayer)("Monarch planning", (it) => {
             (e) => e.entityKind === "journal",
           ),
         );
+        yield* sql`UPDATE monarch_project_context SET settings_json='{"excludedThreadIds":[]}' WHERE project_id=${projectId}`;
+        yield* sql`UPDATE projection_projects SET deleted_at=${at} WHERE project_id=${projectId}`;
+        assert.isNull((yield* service.journal(first)).journal);
+        yield* sql`UPDATE projection_projects SET deleted_at=NULL WHERE project_id=${projectId}`;
+        yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at=${at} WHERE thread_id=${source}`;
+        assert.isNull((yield* service.journal(first)).journal);
       }),
   );
   it.effect("rejects cross-project item, target and thread references and deleted projects", () =>
@@ -435,6 +484,18 @@ it.layer(testLayer)("Monarch planning", (it) => {
           100,
         );
         assert.isTrue(state.hasMoreHistory);
+        assert.isFalse(state.suggestions.some((item) => item.id === "history-1"));
+        const focused = yield* service.list({ projectId, focusSuggestionId: "history-1" });
+        assert.deepEqual(
+          focused.suggestions.map((item) => item.id),
+          [...state.suggestions.map((item) => item.id), "history-1"],
+        );
+        assert.isFalse(focused.hasMoreHistory);
+        const visible = yield* service.list({ projectId, focusSuggestionId: suggestion.id });
+        assert.deepEqual(visible, state);
+        const foreign = yield* fixture("foreign-suggestion-focus");
+        const outside = yield* createSuggestion(foreign.service, foreign.target);
+        assert.deepEqual(yield* service.list({ projectId, focusSuggestionId: outside.id }), state);
         const create = yield* createSuggestion(service, target).pipe(Effect.result);
         assert.isTrue(Result.isFailure(create));
         if (Result.isFailure(create)) assert.strictEqual(create.failure.reason, "capacity");
@@ -552,6 +613,22 @@ it.layer(testLayer)("Monarch planning", (it) => {
           status: "paused",
         });
         yield* insertThread(projectId, prepared.draftThreadId!);
+        assert.equal((yield* service.list({ projectId })).suggestions[0]?.status, "suggested");
+        const timeline = yield* service.timeline({ projectId });
+        assert.isFalse(
+          timeline.events.some(
+            (e) =>
+              e.threadId === prepared.draftThreadId &&
+              e.parentIds.some((id) => id.startsWith("suggestion:")),
+          ),
+        );
+        const premature = yield* service
+          .markSuggestionUsed({ ...input(continued), threadId: prepared.draftThreadId! })
+          .pipe(Effect.result);
+        assert.isTrue(Result.isFailure(premature));
+        const database = yield* SqlClient.SqlClient;
+        yield* database`INSERT INTO orchestration_v2_projection_messages(message_id,thread_id,role,streaming,created_at,updated_at,payload_json)
+          VALUES ('sent',${prepared.draftThreadId},'user',0,'2026-11-05','2026-11-05','{"createdBy":"user"}')`;
         const reloaded = yield* service.list({ projectId });
         const used = reloaded.suggestions[0]!;
         assert.strictEqual(used.status, "used");

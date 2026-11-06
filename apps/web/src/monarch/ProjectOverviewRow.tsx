@@ -13,6 +13,7 @@ export function ProjectOverviewRow({
   title,
   subtitle,
   needsInput = false,
+  onOpen,
 }: {
   dock: MonarchDockController;
   kind: TimelineSelection["entityKind"];
@@ -20,6 +21,7 @@ export function ProjectOverviewRow({
   title: string;
   subtitle: string;
   needsInput?: boolean;
+  onOpen?: () => void;
 }) {
   const selected = dock.selection?.entityKind === kind && dock.selection.entityId === entityId;
   const family = kind === "prompt-schedule" || kind === "review-schedule" ? "schedule" : kind;
@@ -32,7 +34,10 @@ export function ProjectOverviewRow({
       data-selected={selected}
       {...timelineRowProps(dock, kind, entityId)}
       aria-pressed={selected}
-      onClick={() => dock.selectEntity?.({ entityKind: kind, entityId })}
+      onClick={() => {
+        dock.selectEntity?.({ entityKind: kind, entityId });
+        onOpen?.();
+      }}
     >
       <span className={styles.marker} aria-hidden="true">
         {needsInput ? "?" : null}

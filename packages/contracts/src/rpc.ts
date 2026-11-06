@@ -1,4 +1,6 @@
 import {
+  MonarchJournalInput,
+  MonarchJournalResult,
   MonarchTimelineInput,
   MonarchTimelineResult,
   MonarchTimelineHistoryInput,
@@ -465,6 +467,7 @@ import { VcsError } from "./vcs.ts";
 import { Project, ProjectMutation, ProjectMutationError } from "./project.ts";
 
 export const WS_METHODS = {
+  monarchJournalSubscribe: "monarch.journal.subscribe",
   monarchTimelineHistory: "monarch.timeline.history",
   monarchTimelineSubscribe: "monarch.timeline.subscribe",
   monarchContinuityRefresh: "monarch.continuity.refresh",
@@ -778,6 +781,12 @@ const WsMonarchContinuityActivityRpc = Rpc.make(WS_METHODS.monarchContinuityActi
   payload: MonarchContextProjectInput,
   success: MonarchProjectActivityResult,
   error: Schema.Union([MonarchScheduleError, EnvironmentAuthorizationError]),
+});
+const WsMonarchJournalSubscribeRpc = Rpc.make(WS_METHODS.monarchJournalSubscribe, {
+  payload: MonarchJournalInput,
+  success: MonarchJournalResult,
+  error: Schema.Union([MonarchError, EnvironmentAuthorizationError]),
+  stream: true,
 });
 const WsMonarchTimelineHistoryRpc = Rpc.make(WS_METHODS.monarchTimelineHistory, {
   payload: MonarchTimelineHistoryInput,
@@ -2278,6 +2287,7 @@ export class RpcScopeAuthorization extends RpcMiddleware.Service<RpcScopeAuthori
 export const WsRpcGroup = RpcGroup.make(
   WsMonarchContinuityRefreshRpc,
   WsMonarchContinuityActivityRpc,
+  WsMonarchJournalSubscribeRpc,
   WsMonarchTimelineHistoryRpc,
   WsMonarchTimelineSubscribeRpc,
   WsMonarchContinuitySubscribeRpc,

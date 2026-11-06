@@ -12,6 +12,11 @@ export function createMonarchEnvironmentCommands<R, E>(
 ) {
   return {
     timeline: {
+      journal: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+        label: "monarch:journal:live",
+        idleTtlMs: 0,
+        tag: WS_METHODS.monarchJournalSubscribe,
+      }),
       history: createEnvironmentRpcQueryAtomFamily(runtime, {
         label: "monarch:timeline:history",
         tag: WS_METHODS.monarchTimelineHistory,

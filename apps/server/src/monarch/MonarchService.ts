@@ -11,6 +11,8 @@ import {
   MonarchUseSuggestionInput,
   NextThreadSuggestion,
   ThreadId,
+  type MonarchJournalInput,
+  MonarchJournalResult,
   type MonarchTimelineInput,
   type MonarchTimelineHistoryInput,
   type MonarchTimelineHistoryResult,
@@ -30,11 +32,22 @@ import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/sql/SqlClient";
 
 import * as SqliteClient from "@t3tools/shared/nodeSqliteClient";
-import { readTimeline, readTimelineHistory } from "./MonarchTimeline.ts";
+import {
+  confirmedSuggestionSend,
+  validateSuggestionReferences,
+  validateSuggestionUse,
+} from "./SuggestionEligibility.ts";
+import { readJournal, readTimeline, readTimelineHistory } from "./MonarchTimeline.ts";
 
 export class MonarchService extends Context.Service<
   MonarchService,
   {
+    readonly journal: (
+      input: MonarchJournalInput,
+    ) => Effect.Effect<MonarchJournalResult, MonarchError>;
+    readonly watchJournal: (
+      input: MonarchJournalInput,
+    ) => Stream.Stream<MonarchJournalResult, MonarchError>;
     readonly timelineHistory: (
       input: MonarchTimelineHistoryInput,
     ) => Effect.Effect<MonarchTimelineHistoryResult, MonarchError>;
@@ -79,6 +92,7 @@ const now = Clock.currentTimeMillis.pipe(
   Effect.map((millis) => DateTime.formatIso(DateTime.makeUnsafe(millis))),
 );
 const isMonarchError = Schema.is(MonarchError);
+const sameJournal = Schema.toEquivalence(MonarchJournalResult);
 const sameTimeline = Schema.toEquivalence(MonarchTimelineResult);
 const decodeTarget = Schema.decodeEffect(Schema.fromJsonString(MonarchTarget));
 const encodeTarget = Schema.encodeEffect(Schema.fromJsonString(MonarchTarget));
@@ -112,12 +126,12 @@ const make = Effect.gen(function* () {
       );
     if (rows.length === 0) return yield* new MonarchError({ reason: "not_found" });
   });
-  const threadExists = Effect.fn("MonarchService.threadExists")(function* (
+  const requireSentThread = Effect.fn("MonarchService.requireSentThread")(function* (
     projectId: ProjectId,
     threadId: ThreadId,
   ) {
     const rows =
-      yield* sql`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} AND project_id = ${projectId} AND deleted_at IS NULL`.pipe(
+      yield* sql`SELECT thread_id FROM orchestration_v2_projection_threads WHERE thread_id = ${threadId} AND project_id = ${projectId} AND deleted_at IS NULL AND ${confirmedSuggestionSend(sql, threadId)}`.pipe(
         storage,
       );
     if (rows.length === 0) return yield* new MonarchError({ reason: "invalid_reference" });
@@ -146,7 +160,7 @@ const make = Effect.gen(function* () {
       WHERE project_id = ${projectId} AND json_extract(payload_json, '$.status') != 'used'
       AND EXISTS (SELECT 1 FROM orchestration_v2_projection_threads thread
         WHERE thread.thread_id = json_extract(monarch_suggestions.payload_json, '$.draftThreadId')
-        AND thread.project_id = monarch_suggestions.project_id AND thread.deleted_at IS NULL)`.pipe(
+        AND thread.project_id = monarch_suggestions.project_id AND thread.deleted_at IS NULL AND ${confirmedSuggestionSend(sql, sql`thread.thread_id`)})`.pipe(
       storage,
     );
   });
@@ -173,37 +187,6 @@ const make = Effect.gen(function* () {
     );
     if (!rows[0]) return yield* new MonarchError({ reason: "not_found" });
     return yield* decodeSuggestion(rows[0].payload).pipe(storage);
-  });
-  const validateReferences = Effect.fn("MonarchService.validateReferences")(function* (
-    input: Pick<
-      NextThreadSuggestion,
-      "projectId" | "targets" | "sourceThreadIds" | "contextRevision"
-    >,
-  ) {
-    if (input.contextRevision !== undefined) {
-      const [context] = yield* sql<{
-        revision: number;
-      }>`SELECT revision FROM monarch_project_context WHERE project_id = ${input.projectId}`.pipe(
-        storage,
-      );
-      if ((context?.revision ?? 0) !== input.contextRevision)
-        return yield* new MonarchError({ reason: "conflict" });
-    }
-    for (const reference of input.targets) {
-      const target = yield* readTarget(input.projectId, reference.targetId).pipe(
-        Effect.catchTags({
-          MonarchError: (error) =>
-            Effect.fail(
-              error.reason === "not_found"
-                ? new MonarchError({ reason: "invalid_reference" })
-                : error,
-            ),
-        }),
-      );
-      if (target.revision !== reference.revision || target.status !== "active")
-        return yield* new MonarchError({ reason: "conflict" });
-    }
-    for (const threadId of input.sourceThreadIds) yield* threadExists(input.projectId, threadId);
   });
   const saveSuggestion = Effect.fn("MonarchService.saveSuggestion")(function* (
     value: NextThreadSuggestion,
@@ -244,10 +227,11 @@ const make = Effect.gen(function* () {
         WHERE project_id = ${input.projectId} AND json_extract(payload_json, '$.status') = 'suggested'
         ORDER BY json_extract(payload_json, '$.updatedAt') DESC, id DESC`.pipe(storage);
       const historyRows = yield* sql<{
+        id: string;
         payload: string;
-      }>`SELECT payload_json AS payload FROM monarch_suggestions
+      }>`SELECT id,payload_json AS payload FROM monarch_suggestions
         WHERE project_id = ${input.projectId} AND json_extract(payload_json, '$.status') != 'suggested'
-        ORDER BY json_extract(payload_json, '$.updatedAt') DESC, id DESC LIMIT ${SUGGESTION_HISTORY_LIMIT + 1}`.pipe(
+        ORDER BY json_extract(payload_json, '$.updatedAt') DESC, id DESC LIMIT ${SUGGESTION_HISTORY_LIMIT + (input.focusSuggestionId ? 2 : 1)}`.pipe(
         storage,
       );
       const suggestionRows = [...activeRows, ...historyRows.slice(0, SUGGESTION_HISTORY_LIMIT)];
@@ -257,10 +241,24 @@ const make = Effect.gen(function* () {
       const suggestions = yield* Effect.forEach(suggestionRows, (row) =>
         decodeSuggestion(row.payload).pipe(storage),
       );
+      const focusId = input.focusSuggestionId;
+      if (
+        focusId &&
+        historyRows.length > SUGGESTION_HISTORY_LIMIT &&
+        !suggestions.some((s) => s.id === focusId)
+      ) {
+        const [focused] = yield* sql<{
+          payload: string;
+        }>`SELECT payload_json AS payload FROM monarch_suggestions
+          WHERE project_id=${input.projectId} AND id=${focusId}`.pipe(storage);
+        if (focused) suggestions.push(yield* decodeSuggestion(focused.payload).pipe(storage));
+      }
       return {
         targets,
         suggestions,
-        hasMoreHistory: historyRows.length > SUGGESTION_HISTORY_LIMIT,
+        hasMoreHistory: historyRows
+          .slice(SUGGESTION_HISTORY_LIMIT)
+          .some((row) => row.id !== focusId),
       };
     },
     sql.withTransaction,
@@ -333,7 +331,7 @@ const make = Effect.gen(function* () {
         if (rows[0]) return yield* readSuggestion(input.projectId, rows[0].id);
       }
       yield* requireSuggestionCapacity(input.projectId);
-      yield* validateReferences(input);
+      yield* validateSuggestionReferences(sql, input);
       const timestamp = yield* now;
       const value: NextThreadSuggestion = {
         ...input,
@@ -374,7 +372,7 @@ const make = Effect.gen(function* () {
       const targets = input.targets ?? previous.targets;
       const contextRevision = input.contextRevision ?? previous.contextRevision;
       if (input.targets !== undefined || input.contextRevision !== undefined)
-        yield* validateReferences({
+        yield* validateSuggestionReferences(sql, {
           ...previous,
           targets,
           ...(contextRevision === undefined ? {} : { contextRevision }),
@@ -424,9 +422,7 @@ const make = Effect.gen(function* () {
     function* (raw) {
       const input = yield* decodeInput(MonarchSuggestionInput, raw);
       const previous = yield* requireSuggestion(input);
-      if (previous.status !== "suggested")
-        return yield* new MonarchError({ reason: "invalid_state" });
-      yield* validateReferences(previous);
+      yield* validateSuggestionUse(sql, previous);
       if (previous.draftThreadId !== null) return previous;
       return yield* saveSuggestion(
         {
@@ -450,12 +446,15 @@ const make = Effect.gen(function* () {
       yield* projectExists(input.projectId);
       const previous = yield* readSuggestion(input.projectId, input.id);
       // A retried acknowledgement must not create a second thread or lose its first link.
-      if (previous.status === "used" && previous.usedThreadId === input.threadId) return previous;
+      if (previous.status === "used" && previous.usedThreadId === input.threadId) {
+        yield* requireSentThread(input.projectId, input.threadId);
+        return previous;
+      }
       if (previous.revision !== input.expectedRevision)
         return yield* new MonarchError({ reason: "conflict" });
       if (previous.status !== "suggested" || previous.draftThreadId !== input.threadId)
         return yield* new MonarchError({ reason: "invalid_state" });
-      yield* threadExists(input.projectId, input.threadId);
+      yield* requireSentThread(input.projectId, input.threadId);
       return yield* saveSuggestion(
         {
           ...previous,
@@ -487,6 +486,13 @@ const make = Effect.gen(function* () {
     storage,
     Effect.map((rows) => rows[0]!.version),
   );
+  const journal = (input: MonarchJournalInput) =>
+    readJournal(input).pipe(
+      sql.withTransaction,
+      SqliteClient.readOnly,
+      Effect.provideService(SqlClient.SqlClient, sql),
+      storage,
+    );
   const timelineHistory = (input: MonarchTimelineHistoryInput) =>
     readTimelineHistory(input).pipe(
       sql.withTransaction,
@@ -497,6 +503,14 @@ const make = Effect.gen(function* () {
   return MonarchService.of({
     timeline,
     timelineHistory,
+    journal,
+    watchJournal: (input) =>
+      Stream.tick("3 seconds").pipe(
+        Stream.mapEffect(() => timelineVersion),
+        Stream.changes,
+        Stream.mapEffect(() => journal(input)),
+        Stream.changesWith(sameJournal),
+      ),
     watchTimeline: (input) =>
       Stream.tick("3 seconds").pipe(
         Stream.mapEffect(() => timelineVersion),

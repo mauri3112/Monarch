@@ -1,17 +1,22 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import type { MonarchTimelineEvent, ScopedProjectRef } from "@t3tools/contracts";
+import type { MonarchJournalRef, MonarchTimelineEvent, ScopedProjectRef } from "@t3tools/contracts";
 import { useState } from "react";
-import { Link } from "@tanstack/react-router";
 import { Maximize2Icon, Minimize2Icon, XIcon } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { monarchEnvironment } from "../state/monarch";
 import { useQuietThreadShells } from "../state/entities";
 import { overlayCurrentThreadActivity } from "./projectTimelineCurrentState";
 import { useEnvironmentQuery } from "../state/query";
-import { buildThreadRouteParams } from "../threadRoutes";
 import { useMonarchDock } from "./MonarchDockContext";
 import { ProjectTimeline } from "./ProjectTimeline";
 import { selectTimelineEvent } from "./projectTimelineSelection";
+
+const journalTabTime = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+});
 
 export function ProjectActivityDock({
   projectRef,
@@ -106,6 +111,43 @@ export function ProjectActivityDock({
           }
         : null,
     );
+  function journalDocument(ref: MonarchJournalRef) {
+    const receipt = query.data?.events.find(
+      (node) =>
+        node.entityKind === "journal" &&
+        node.journalRefs?.some(
+          (candidate) => candidate.runId === ref.runId && candidate.revision === ref.revision,
+        ),
+    );
+    const date = receipt?.at ? new Date(receipt.at) : null;
+    const at = date && Number.isFinite(date.getTime()) ? journalTabTime.format(date) : null;
+    return {
+      kind: "journal" as const,
+      ...ref,
+      title: ["Journal", at, `r${ref.revision}`].filter(Boolean).join(" · "),
+    };
+  }
+  function documentFor(event: MonarchTimelineEvent) {
+    if (event.entityKind === "thread" && event.threadId)
+      return {
+        kind: "thread" as const,
+        threadRef: scopeThreadRef(projectRef.environmentId, event.threadId),
+        title: event.title,
+      };
+    if (event.entityKind === "suggestion")
+      return { kind: "suggestion" as const, suggestionId: event.entityId, title: event.title };
+    if (
+      (event.entityKind === "journal" || event.modelStage === "journal") &&
+      event.journalRefs?.length === 1 &&
+      event.journalRefs[0]
+    )
+      return journalDocument(event.journalRefs[0]);
+    return null;
+  }
+  function open(event: MonarchTimelineEvent) {
+    const document = documentFor(event);
+    if (document) dock?.openDocument?.(document);
+  }
   return (
     <section className="flex h-full min-h-0 min-w-0 flex-col" aria-label="Project Timeline">
       <header className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b border-border px-4">
@@ -154,6 +196,8 @@ export function ProjectActivityDock({
           timeline={query.data}
           selectedNodeId={selected?.id ?? null}
           onSelectNode={choose}
+          onOpenEvent={open}
+          detailPresentation={(event) => (documentFor(event) ? "external" : "inline")}
           onLoadOlder={loadOlder}
           loadingOlder={history.isPending}
           hoveredEntityKey={dock?.hoveredEntityKey ?? null}
@@ -164,26 +208,57 @@ export function ProjectActivityDock({
                 <Button
                   size="xs"
                   variant="outline"
-                  render={
-                    <Link
-                      to="/$environmentId/$threadId"
-                      params={buildThreadRouteParams(
-                        scopeThreadRef(projectRef.environmentId, event.threadId),
-                      )}
-                    />
-                  }
+                  onClick={() => {
+                    if (event.threadId)
+                      dock?.openDocument?.({
+                        kind: "thread",
+                        threadRef: scopeThreadRef(projectRef.environmentId, event.threadId),
+                        title:
+                          threads.find(
+                            (thread) =>
+                              thread.environmentId === projectRef.environmentId &&
+                              thread.id === event.threadId,
+                          )?.title ?? "Source thread",
+                      });
+                  }}
                 >
                   {event.state === "needs-input" ? "Reply" : "Open thread"}
                 </Button>
               ) : null}
+              {event.journalRefs?.map((ref, index) => {
+                const document = journalDocument(ref);
+                return (
+                  <Button
+                    key={`${ref.runId}:${ref.revision}`}
+                    size="xs"
+                    variant="outline"
+                    onClick={() => dock?.openDocument?.(document)}
+                  >
+                    {event.journalRefs?.length === 1 ? "Read journal" : `Read journal ${index + 1}`}{" "}
+                    · r{ref.revision}
+                  </Button>
+                );
+              })}
               {event.parentIds.map((parentId) => {
                 const parent = query.data?.events.find((item) => item.id === parentId);
-                return parent ? (
+                return parent &&
+                  !(
+                    parent.entityKind === "journal" &&
+                    event.journalRefs?.some((ref) =>
+                      parent.journalRefs?.some(
+                        (candidate) =>
+                          candidate.runId === ref.runId && candidate.revision === ref.revision,
+                      ),
+                    )
+                  ) ? (
                   <Button
                     key={parentId}
                     size="xs"
                     variant="ghost-muted"
-                    onClick={() => choose(parent)}
+                    onClick={() => {
+                      choose(parent);
+                      open(parent);
+                    }}
                   >
                     {parent.entityKind === "journal"
                       ? "Source journal"

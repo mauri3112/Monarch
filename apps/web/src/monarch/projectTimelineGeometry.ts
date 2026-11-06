@@ -7,6 +7,7 @@ export interface TimelineMarkerPoint {
   rowBottom: number;
   radius: number;
   labelGap: number;
+  railGap?: number;
 }
 
 type Point = Pick<TimelineMarkerPoint, "x" | "y">;
@@ -40,12 +41,22 @@ function markerPath(source: TimelineMarkerPoint, destination: TimelineMarkerPoin
   return `M ${source.x} ${source.y} ${bridge(source, destination, entryGap(source, destination))}`;
 }
 
+function actionExitPath(source: TimelineMarkerPoint, destination: TimelineMarkerPoint) {
+  const channel = source.x + source.radius + source.labelGap / 2;
+  const exit = {
+    x: channel,
+    y: source.y + Math.sign(destination.y - source.y) * (channel - source.x),
+  };
+  return `M ${source.x} ${source.y} Q ${channel} ${source.y} ${exit.x} ${exit.y} ${bridge(exit, destination, entryGap(source, destination))}`;
+}
+
 type Node = Pick<MonarchTimelineEvent, "id" | "entityId" | "family" | "parentIds">;
 type Pin = TimelineMarkerPoint & { id: string };
 type Fork = { origin: Pin; children: Pin[] };
+type SideFork = Fork & { kind: "fork" | "causal" | "revision" };
 
 export interface TimelineWire {
-  kind: "fork" | "twig" | "revision" | "sent" | "source";
+  kind: "fork" | "twig" | "revision" | "sent" | "source" | "causal";
   from: string;
   to: string;
   path: string;
@@ -57,10 +68,11 @@ export function timelineWires(
 ) {
   const nodes = new Map(events.map((node) => [node.id, node]));
   const forks: Fork[] = [];
+  const sideForks = new Map<string, SideFork>();
+  const childCounts = new Map<string, number>();
   const sends: { origin: Pin; destination: Pin }[] = [];
   const wires: TimelineWire[] = [];
   let lastFork: Fork | undefined;
-  let previousProposal: Node | undefined;
   for (const node of events) {
     const destination = pins.get(node.id);
     if (!destination) continue;
@@ -69,6 +81,29 @@ export function timelineWires(
       const parent = nodes.get(id);
       const origin = pins.get(id);
       if (!parent || !origin) continue;
+      childCounts.set(id, (childCounts.get(id) ?? 0) + 1);
+      if (
+        node.family !== "thread" &&
+        node.family !== "target" &&
+        parent.family !== "thread" &&
+        parent.family !== "target" &&
+        Math.abs(origin.x - destination.x) < 0.5
+      ) {
+        const kind =
+          node.family === "suggestion"
+            ? parent.family === "suggestion" && node.entityId === parent.entityId
+              ? "revision"
+              : "fork"
+            : "causal";
+        const key = `${kind}:${id}`;
+        let fork = sideForks.get(key);
+        if (!fork) {
+          fork = { kind, origin: { id, ...origin }, children: [] };
+          sideForks.set(key, fork);
+        }
+        fork.children.push({ id: node.id, ...destination });
+        continue;
+      }
       if (node.family === "suggestion" && parent.family !== "suggestion") {
         currentFork = lastFork?.origin.id === id ? lastFork : undefined;
         if (!currentFork) {
@@ -83,25 +118,79 @@ export function timelineWires(
           kind: "source",
           from: id,
           to: node.id,
-          path: markerPath(origin, destination),
-        });
-      } else if (
-        node.family === "suggestion" &&
-        previousProposal?.id === id &&
-        node.entityId === parent.entityId
-      ) {
-        // A straight revision link must never pass through another proposal.
-        wires.push({
-          kind: "revision",
-          from: id,
-          to: node.id,
-          path: markerPath(origin, destination),
+          path:
+            parent.family === "target" || parent.family === "thread"
+              ? markerPath(origin, destination)
+              : actionExitPath(origin, destination),
         });
       }
     }
     if (node.family === "suggestion") {
       lastFork = currentFork;
-      previousProposal = node;
+    }
+  }
+
+  const bracketed: SideFork[] = [];
+  for (const fork of sideForks.values()) {
+    const { origin, children, kind } = fork;
+    const child = children[0]!;
+    const intervening = events.some((node) => {
+      if (
+        node.id === origin.id ||
+        node.id === child.id ||
+        node.family === "thread" ||
+        node.family === "target"
+      )
+        return false;
+      const pin = pins.get(node.id);
+      return (
+        pin &&
+        Math.abs(pin.x - origin.x) < 0.5 &&
+        pin.y > Math.min(origin.y, child.y) &&
+        pin.y < Math.max(origin.y, child.y)
+      );
+    });
+    if (children.length === 1 && childCounts.get(origin.id) === 1 && !intervening) {
+      wires.push({ kind, from: origin.id, to: child.id, path: markerPath(origin, child) });
+    } else {
+      bracketed.push(fork);
+    }
+  }
+  // Each recorded parent owns a side bracket; intervening actions never become sequential links.
+  const orderedSideForks = bracketed.sort(
+    (a, b) =>
+      Math.min(a.origin.y, ...a.children.map((child) => child.y)) -
+      Math.min(b.origin.y, ...b.children.map((child) => child.y)),
+  );
+  const channelEnds: number[] = [];
+  const sideChannels = orderedSideForks.map(({ origin, children }) => {
+    const start = Math.min(origin.y, ...children.map((child) => child.y));
+    const end = Math.max(origin.y, ...children.map((child) => child.y));
+    const available = channelEnds.findIndex((previousEnd) => previousEnd < start);
+    const channel = available < 0 ? channelEnds.length : available;
+    channelEnds[channel] = end;
+    return channel;
+  });
+  for (const [index, { origin, children, kind }] of orderedSideForks.entries()) {
+    const gap = Math.max(
+      0,
+      Math.min(origin.railGap ?? 7, ...children.map((child) => child.railGap ?? 7)) - 6,
+    );
+    const offset =
+      origin.radius + 5 + (gap * (sideChannels[index]! + 1)) / (channelEnds.length + 1);
+    const stem = origin.x - offset;
+    for (const child of children) {
+      const direction = Math.sign(child.y - origin.y) || 1;
+      const round = Math.min(3, offset / 2, Math.abs(child.y - origin.y) / 2);
+      const path = [
+        `M ${origin.x} ${origin.y}`,
+        `H ${stem + round}`,
+        `Q ${stem} ${origin.y} ${stem} ${origin.y + direction * round}`,
+        `V ${child.y - direction * round}`,
+        `Q ${stem} ${child.y} ${stem + round} ${child.y}`,
+        `H ${child.x}`,
+      ].join(" ");
+      wires.push({ kind, from: origin.id, to: child.id, path });
     }
   }
 

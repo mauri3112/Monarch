@@ -40,6 +40,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.monarchContinuityRefresh]: "monarch",
   [WS_METHODS.monarchContinuityActivity]: "monarch",
   [WS_METHODS.monarchTimelineHistory]: "monarch",
+  [WS_METHODS.monarchJournalSubscribe]: "monarch",
   [WS_METHODS.monarchTimelineSubscribe]: "monarch",
   [WS_METHODS.monarchContinuitySubscribe]: "monarch",
   [WS_METHODS.monarchContinuitySources]: "monarch",

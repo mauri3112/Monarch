@@ -181,6 +181,10 @@
   stroke: var(--timeline-rail);
 }
 
+.project-timeline-wires path[data-connection="causal"] {
+  stroke: var(--timeline-model);
+}
+
 .project-timeline-day {
   position: relative;
   align-items: center;
@@ -241,7 +245,7 @@
   grid-column: 2;
 }
 
-.project-timeline-row[data-lane="proposal"] .project-timeline-event {
+.project-timeline-row[data-lane="actions"] .project-timeline-event {
   grid-column: 3;
 }
 
@@ -299,14 +303,8 @@
 .project-timeline [data-family="model"] .project-timeline-ink {
   border: 0;
   border-radius: 0;
-  background: linear-gradient(
-    to bottom,
-    transparent 12%,
-    var(--timeline-color) 12% 36%,
-    transparent 36% 60%,
-    var(--timeline-color) 60% 84%,
-    transparent 84%
-  );
+  background: var(--timeline-color);
+  clip-path: polygon(50% 4%, 98% 94%, 2% 94%);
 }
 
 .project-timeline [data-family="suggestion"] .project-timeline-ink {
@@ -481,12 +479,8 @@
 
 .project-timeline-legend [data-family="model"] i {
   border-radius: 0;
-  background: linear-gradient(
-    to bottom,
-    var(--timeline-model) 35%,
-    transparent 35% 65%,
-    var(--timeline-model) 65%
-  );
+  background: var(--timeline-model);
+  clip-path: polygon(50% 0, 100% 100%, 0 100%);
 }
 
 .project-timeline-legend [data-family="suggestion"] i {

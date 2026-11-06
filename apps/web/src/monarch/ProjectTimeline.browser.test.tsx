@@ -80,12 +80,29 @@ it("keeps continuous project and work spines centered through dates, compact lay
     }),
     event({ id: "work-before", title: "Earlier work", at: "2026-11-04T10:00:00.000Z" }),
     event({
+      id: "review-before",
+      entityKind: "review",
+      entityId: "review",
+      family: "model",
+      title: "Project review",
+      at: "2026-11-05T09:00:00.000Z",
+    }),
+    event({
+      id: "journal-between",
+      entityKind: "journal",
+      entityId: "unrelated-journal",
+      family: "model",
+      title: "An unrelated saved journal with a long readable caption",
+      at: "2026-11-05T09:30:00.000Z",
+    }),
+    event({
       id: "proposal-between",
       entityKind: "suggestion",
       entityId: "proposal",
       family: "suggestion",
       title: "Proposed follow-up",
       at: "2026-11-05T10:00:00.000Z",
+      parentIds: ["review-before"],
     }),
     event({
       id: "schedule-after",
@@ -112,7 +129,7 @@ it("keeps continuous project and work spines centered through dates, compact lay
       const bounds = canvas!.getBoundingClientRect();
       expect(screen.container.querySelectorAll("[data-timeline-spine]")).toHaveLength(2);
       for (const [lane, ids] of [
-        ["project", ["target-before", "schedule-after"]],
+        ["project", ["target-before"]],
         ["work", ["work-before", "work-after"]],
       ] as const) {
         const spine = screen.container.querySelector<HTMLElement>(
@@ -139,6 +156,35 @@ it("keeps continuous project and work spines centered through dates, compact lay
         expect(rail.bottom).toBeGreaterThanOrEqual(Math.max(...centers));
         expect(rail.height).toBeGreaterThanOrEqual(Math.max(...centers) - Math.min(...centers));
       }
+      const actionCenters = [
+        "review-before",
+        "journal-between",
+        "proposal-between",
+        "schedule-after",
+      ].map((id) => {
+        const marker = screen.container.querySelector<HTMLElement>(
+          `[data-timeline-marker="${id}"]`,
+        )!;
+        const box = marker.getBoundingClientRect();
+        return box.left + box.width / 2;
+      });
+      expect(Math.max(...actionCenters) - Math.min(...actionCenters)).toBeLessThan(1);
+      const branch = screen.container.querySelector<SVGPathElement>(
+        '[data-source-event="review-before"][data-destination-event="proposal-between"]',
+      );
+      expect(branch).not.toBeNull();
+      const journal = screen.container.querySelector<HTMLElement>(
+        '[data-timeline-marker="journal-between"]',
+      )!;
+      const markerBounds = journal.getBoundingClientRect();
+      const transform = branch!.getScreenCTM()!;
+      for (let step = 0; step <= 50; step++) {
+        const point = branch!.getPointAtLength((branch!.getTotalLength() * step) / 50);
+        const rendered = new DOMPoint(point.x, point.y).matrixTransform(transform);
+        if (rendered.y > markerBounds.top && rendered.y < markerBounds.bottom) {
+          expect(rendered.x).toBeLessThan(markerBounds.left - 1);
+        }
+      }
     });
   };
   await assertSpines();
@@ -156,4 +202,33 @@ it("keeps continuous project and work spines centered through dates, compact lay
     .toHaveTextContent("110%");
   await assertSpines();
   await expect.element(laterWork).toHaveAttribute("aria-pressed", "true");
+});
+
+it("opens events on click and Enter while arrow navigation only selects", async () => {
+  const onOpenEvent = vi.fn();
+  const events = [event({}), event({ id: "next", title: "Next work" })];
+  await using screen = await render(
+    <div style={{ width: 500, height: 500 }}>
+      <ProjectTimeline
+        timeline={{ projectId: ProjectId.make("timeline-open"), events, hasOlder: false }}
+        onOpenEvent={onOpenEvent}
+        detailPresentation={() => "external"}
+      />
+    </div>,
+    // Opening an event is delegated to the parent; the renderer has no route dependency.
+    { router: false },
+  );
+  await userEvent.click(screen.getByRole("button", { name: /Check recovery\. Thread started/ }));
+  expect(onOpenEvent).toHaveBeenCalledTimes(1);
+  await userEvent.keyboard("{ArrowDown}");
+  expect(onOpenEvent).toHaveBeenCalledTimes(1);
+  await expect
+    .element(screen.getByRole("button", { name: /Next work\. Thread started/ }))
+    .toHaveAttribute("aria-pressed", "true");
+  await userEvent.keyboard("{Enter}");
+  expect(onOpenEvent).toHaveBeenCalledTimes(2);
+  expect(onOpenEvent.mock.lastCall?.[0].id).toBe("next");
+  await expect
+    .element(screen.getByRole("button", { name: "Clear timeline selection" }))
+    .not.toBeInTheDocument();
 });

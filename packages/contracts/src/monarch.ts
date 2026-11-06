@@ -39,7 +39,10 @@ export const MonarchTarget = Schema.Struct({
   updatedAt: IsoDateTime,
 });
 export type MonarchTarget = typeof MonarchTarget.Type;
-export const MonarchProjectInput = Schema.Struct({ projectId: ProjectId });
+export const MonarchProjectInput = Schema.Struct({
+  projectId: ProjectId,
+  focusSuggestionId: Schema.optionalKey(EntityId),
+});
 export type MonarchProjectInput = typeof MonarchProjectInput.Type;
 export const MonarchCreateTargetInput = Schema.Struct({ projectId: ProjectId, ...TargetFields });
 export type MonarchCreateTargetInput = typeof MonarchCreateTargetInput.Type;

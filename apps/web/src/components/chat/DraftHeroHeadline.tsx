@@ -1,3 +1,5 @@
+import { suggestionIdForDraft } from "../../monarch/suggestionDraftIdentity";
+import { SuggestedDraftHeadline } from "../../monarch/SuggestedDraftHeadline";
 import type { DraftId } from "~/composerDraftStore";
 import { composerDraftHasUserContent, useComposerDraftStore } from "~/composerDraftStore";
 import { resolveEnvironmentMachineKind, type ScopedProjectRef } from "@t3tools/contracts";
@@ -69,7 +71,16 @@ interface DraftHeroHeadlineProps {
   readonly activeProjectTitle: string | null;
 }
 
-export function DraftHeroHeadline({
+export function DraftHeroHeadline(props: DraftHeroHeadlineProps) {
+  const { draftId, activeProjectRef } = props;
+  const suggestion =
+    draftId && activeProjectRef ? suggestionIdForDraft(activeProjectRef, draftId) : null;
+  if (suggestion && activeProjectRef)
+    return <SuggestedDraftHeadline projectRef={activeProjectRef} suggestionId={suggestion} />;
+  return <StandardDraftHeroHeadline {...props} />;
+}
+
+function StandardDraftHeroHeadline({
   draftId,
   activeProjectRef,
   activeProjectTitle,

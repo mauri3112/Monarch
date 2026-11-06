@@ -88,7 +88,7 @@ jobs:
           src/monarch/MonarchScheduler.test.ts src/monarch/ReviewContextBudget.test.ts
           src/persistence/Migrations.test.ts
           src/mcp/toolkits/monarch/handlers.test.ts src/provider/AgentContextBudget.test.ts
-          src/textGeneration/CodexTextGeneration.test.ts src/orchestration-v2/RunExecutionService.test.ts
+          src/textGeneration/CodexTextGeneration.test.ts src/orchestration-v2/RunExecutionService.test.ts src/orchestration-v2/ThreadLaunchService.test.ts
       - name: Check project workspace and voice client
         working-directory: apps/web
         run: >-

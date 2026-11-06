@@ -10,7 +10,7 @@ import { MonarchDockContext, type TimelineSelection } from "./MonarchDockContext
 
 const mocks = vi.hoisted(() => ({
   canEdit: true,
-  context: { revision: 2, settings: { enabled: false, paused: false } },
+  context: { revision: 2, settings: { enabled: false, paused: false, excludedThreadIds: [] } },
   data: {
     targets: [
       {
@@ -47,7 +47,13 @@ const mocks = vi.hoisted(() => ({
   command: vi.fn(async (_command: unknown, _input: unknown) => ({ _tag: "Success", value: {} })),
   prepare: vi.fn(async () => {}),
   refresh: vi.fn(),
-  threadShells: [] as Array<{ id: string; environmentId: string; projectId: string }>,
+  threadShells: [] as Array<{
+    id: string;
+    environmentId: string;
+    projectId: string;
+    latestUserAuthoredMessageAt?: string | null;
+    latestUserMessageAt?: string | null;
+  }>,
 }));
 
 vi.mock("@effect/atom-react", async (importOriginal) => ({
@@ -73,7 +79,10 @@ vi.mock("../state/query", () => ({
     refresh: mocks.refresh,
   }),
 }));
-vi.mock("../state/entities", () => ({ useQuietThreadShells: () => mocks.threadShells }));
+vi.mock("../state/entities", () => ({
+  useQuietThreadShells: () => mocks.threadShells,
+  readThreadShell: () => null,
+}));
 vi.mock("../state/use-atom-command", () => ({
   useAtomCommand: (command: { permissionAtom: unknown }) => (input: unknown) =>
     mocks.command(command, input),
@@ -181,7 +190,7 @@ it("keeps mutations unavailable without an operate grant", async () => {
   await expect.element(screen.getByRole("button", { name: "Use" })).toBeDisabled();
 });
 
-it("records a suggestion as used only after its reserved thread is persisted", async () => {
+it("records a suggestion as used only after its reserved thread has a user-authored message", async () => {
   mocks.canEdit = true;
   mocks.command.mockClear();
   mocks.data.suggestions[0]!.draftThreadId = "thread-1" as never;
@@ -194,6 +203,13 @@ it("records a suggestion as used only after its reserved thread is persisted", a
     await using screen = await render(
       <ProjectPlanning projectRef={projectRef} projectTitle="Test project" archived={false} />,
       { router: "/workspace/environment-1/project-1" },
+    );
+    expect(mocks.command).not.toHaveBeenCalled();
+    mocks.threadShells = [
+      { ...mocks.threadShells[0]!, latestUserAuthoredMessageAt: "2026-11-06T10:00:00Z" },
+    ];
+    await screen.rerender(
+      <ProjectPlanning projectRef={projectRef} projectTitle="Test project" archived={false} />,
     );
     await vi.waitFor(() => expect(mocks.command).toHaveBeenCalled());
     expect(mocks.command.mock.calls.at(-1)?.[1]).toMatchObject({
@@ -214,12 +230,18 @@ it("records a suggestion as used only after its reserved thread is persisted", a
 
 function CurrentMaterialHarness({ selection }: { selection: TimelineSelection }) {
   const [actionHost, setActionHost] = useState<HTMLDivElement | null>(null);
+  const [documentHost, setDocumentHost] = useState<HTMLDivElement | null>(null);
   return (
     <MonarchDockContext
       value={{
         activeKind: "timeline",
         selection,
         actionHost,
+        documentHost,
+        activeDocument:
+          selection.entityKind === "suggestion"
+            ? { kind: "suggestion", suggestionId: selection.entityId, title: "Check recovery" }
+            : null,
         host: null,
         open: () => {},
         close: () => {},
@@ -228,11 +250,12 @@ function CurrentMaterialHarness({ selection }: { selection: TimelineSelection })
     >
       <ProjectPlanning projectRef={projectRef} projectTitle="Test project" archived={false} />
       <div ref={setActionHost} aria-label="Timeline footer" />
+      <div role="tabpanel" ref={setDocumentHost} aria-label="Suggestion document" />
     </MonarchDockContext>
   );
 }
 
-it("shows current owner rationale and stale causes while a historical event is selected", async () => {
+it("opens suggestion material in the document pane and leaves Target controls in the graph", async () => {
   mocks.canEdit = true;
   mocks.data.targets[0]!.description = "Restore unsent drafts after a restart.";
   try {
@@ -246,15 +269,16 @@ it("shows current owner rationale and stale causes while a historical event is s
       />,
       { router: "/workspace/environment-1/project-1" },
     );
-    await expect
-      .element(screen.getByText("Current saved proposal · Revision 3 · suggested"))
-      .toBeVisible();
+    const document = screen.getByRole("tabpanel", { name: "Suggestion document" });
+    await expect.element(document.getByRole("heading", { name: "Check recovery" })).toBeVisible();
+    expect(screen.container.querySelector('[aria-label="Timeline footer"]')?.textContent).toBe("");
     await expect.element(screen.getByText("Several threads changed persistence")).toBeVisible();
     await expect
       .element(screen.getByText("Target “Improve reliability” changed from revision 1 to 2."))
       .toBeVisible();
-    await expect.element(screen.getByRole("button", { name: "Use", exact: true })).toBeDisabled();
-    await userEvent.click(screen.getByText("Current prompt", { exact: true }));
+    await expect
+      .element(document.getByRole("button", { name: "Open draft", exact: true }))
+      .toBeDisabled();
     await expect
       .element(screen.getByText("Test restore after restart", { exact: true }))
       .toBeVisible();
