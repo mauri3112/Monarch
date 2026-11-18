@@ -1,7 +1,7 @@
-# T3 Code Mobile
+# Upstream iOS client
 
 > [!NOTE]
-> To install the released app from the App Store or Google Play, see [Mobile app](../../docs/user/install.md#mobile-app). This guide covers building it from source.
+> Monarch supports web and desktop. Use this upstream iOS client only for explicitly requested mobile development.
 
 ## Quickstart
 
@@ -22,12 +22,11 @@ repository-root `.env` or `.env.local`, not an `apps/mobile/.env` file. See
 
 ## Development
 
-For simulator, emulator, or Android phone development, boot or connect a device, then install the
+For iOS simulator development, boot the simulator and install the
 native client that matches this checkout before starting Metro:
 
 ```bash
 vp run mobile:install ios [simulator-udid]
-# Or: vp run mobile:install android [emulator-or-phone-serial]
 vp run dev:client
 ```
 
@@ -35,18 +34,15 @@ The device argument can be omitted when exactly one device is booted or connecte
 compares this checkout's Expo fingerprint and the installed binary with its last install record,
 and reuses a matching client. Otherwise it installs the build for that fingerprint from
 `~/.cache/t3code/native-clients/artifacts`, then the shared task cache, and builds only when
-neither has it. One iOS simulator build serves every iPhone and iPad simulator, and one APK per
-ABI (x86_64 or arm64-v8a) serves every emulator and phone of that ABI. Build output goes to the
+neither has it. One iOS simulator build serves every iPhone and iPad simulator. Build output goes to the
 log file it prints (`T3_NATIVE_CLIENT_VERBOSE=1` streams it instead). Builds are shared back when
 your task-cache login (`bash infra/task-cache/install.sh`) can write. `T3_NATIVE_CLIENT_CACHE=read`
 skips the upload and `off` skips the shared cache. Physical iPhones still use `vp run ios:dev`.
 
 `--session <name>` installs into an agent-device session opened elsewhere, such as a device pool
-or a cloud simulator, instead of a local device: `vp run mobile:install android --session pool-1
---metro http://<this-machine>:8081`. It uses only the cached build (x86_64 by default; `--abi`
-for ARM) and fails with the next step when no machine has built this fingerprint yet.
+or a cloud iOS simulator: `vp run mobile:install ios --session pool-1 --metro http://<this-machine>:8081`.
 
-For a read-only decision, run `node ../../scripts/mobile-native-client.ts check <ios|android>
+For a read-only decision, run `node ../../scripts/mobile-native-client.ts check ios
 [device]`: exit 0 means compatible, 2 means an install is needed, and 1 means an operational error.
 An externally installed client is unverified until the helper installs it once.
 
@@ -122,7 +118,7 @@ Run static checks for mobile native code:
 node ../../scripts/mobile-native-static-check.ts
 ```
 
-The native lint task runs SwiftLint for Swift plus ktlint and detekt for Kotlin. Missing native tools are reported as warnings and skipped locally. CI installs the default toolset from `apps/mobile/Brewfile` before running the native checks.
+This check runs SwiftLint when installed.
 
 ## EAS Builds
 
@@ -150,12 +146,4 @@ Create a persistent preview build:
 
 ```bash
 vp run eas:ios:preview
-```
-
-Android equivalents:
-
-```bash
-vp run eas:android:dev
-vp run eas:android:preview:dev
-vp run eas:android:preview
 ```

@@ -315,7 +315,7 @@ Git deployments remain disabled in `apps/marketing/vercel.ts`.
 
 Merges to main publish compatible OTAs and build iOS prereleases with the `testflight`
 profile at version `3.0.0`. Build numbers increment automatically. The committed app
-version remains the App Store release version; Android keeps using that version.
+version remains the App Store release version.
 
 To release iOS, dispatch **Mobile EAS Production** with `mode=build`,
 `profile=production`, `platform=ios`, and the intended version, such as `2.0.1`.
@@ -332,26 +332,6 @@ separated by their major-version fingerprints. Manual `mode=update` uses the
 selected profile's version. Before releasing `3.0.0` to the App Store, advance
 `build.testflight.env.T3CODE_MOBILE_VERSION` in `apps/mobile/eas.json` to the next
 unreleased major and get its first beta build approved.
-
-## Android APK mirror
-
-`.github/workflows/mobile-android-apk.yml` checks the Google Play Alpha closed-testing
-track hourly. Each new beta gets one `android-beta-<build-number>` prerelease
-containing its APK. Unchanged checks publish nothing, and interrupted draft
-uploads resume on the next check.
-
-Normal Nightly releases include the newest processed internal-testing APK available
-when the release publishes. Internal builds do not create separate Android releases.
-If Play credentials or a processed APK are unavailable, the Nightly can still publish
-without an APK. Android submissions continue to go to internal testing; promote a
-build to Alpha to publish it as a beta.
-
-The APK is the universal APK Play generates and signs from the
-uploaded bundle, so no signing key lives in GitHub. The job skips itself until
-`GOOGLE_PLAY_SERVICE_ACCOUNT_JSON` holds a Play service account key with the "Release to
-production, exclude devices, and use Play App Signing" permission, which downloading generated
-APKs requires. The job reads tracks without opening a Play edit, so it can share the service
-account EAS Submit uses.
 
 ## Hosted web app release deployment
 

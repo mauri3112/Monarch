@@ -24,7 +24,6 @@ const observeEndpointUrl = repoEnv.T3CODE_RELAY_URL?.trim()
   : "https://observe.invalid";
 
 const fromRepoRoot = (relativePath: string) => `../../${relativePath}`;
-const androidAdaptiveForeground = "./assets/android-icon-foreground.png";
 
 if (
   isIosPersonalTeamBuild &&
@@ -40,39 +39,18 @@ const DEVELOPMENT_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.developmentIosIconPng),
-  androidAdaptiveForeground,
-  androidAdaptiveBackgroundColor: "#347FF8",
-  androidAdaptiveBackgroundImage: "./assets/android-icon-background-dev.png",
-  androidSplashIcon: "./assets/android-splash-icon-dev.png",
-  androidMonochromeIcon: "./assets/android-icon-mark.png",
-  androidNotificationIcon: "./assets/android-notification-icon.png",
-  androidNotificationColor: "#00639B",
 } as const;
 
 const PREVIEW_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.nightlyIosIconPng),
-  androidAdaptiveForeground,
-  androidAdaptiveBackgroundColor: "#111533",
-  androidAdaptiveBackgroundImage: "./assets/android-icon-background-nightly.png",
-  androidSplashIcon: "./assets/android-splash-icon-nightly.png",
-  androidMonochromeIcon: "./assets/android-icon-mark.png",
-  androidNotificationIcon: "./assets/android-notification-icon.png",
-  androidNotificationColor: "#7565C7",
 } as const;
 
 const RELEASE_ASSETS = {
   appIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
   iosIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIconComposerProject),
   splashIcon: fromRepoRoot(BRAND_ASSET_PATHS.productionIosIconPng),
-  androidAdaptiveForeground,
-  androidAdaptiveBackgroundColor: "#000000",
-  androidAdaptiveBackgroundImage: undefined,
-  androidSplashIcon: "./assets/android-splash-icon-prod.png",
-  androidMonochromeIcon: "./assets/android-icon-mark.png",
-  androidNotificationIcon: "./assets/android-notification-icon.png",
-  androidNotificationColor: "#FFFFFF",
 } as const;
 
 const VARIANT_CONFIG = {
@@ -80,7 +58,6 @@ const VARIANT_CONFIG = {
     appName: "T3 Code Dev",
     scheme: "t3code-dev",
     iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
     relyingParty: "clerk.t3.codes",
     assets: DEVELOPMENT_ASSETS,
   },
@@ -88,7 +65,6 @@ const VARIANT_CONFIG = {
     appName: "T3 Code Preview",
     scheme: "t3code-preview",
     iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
     relyingParty: "clerk.t3.codes",
     assets: PREVIEW_ASSETS,
   },
@@ -96,7 +72,6 @@ const VARIANT_CONFIG = {
     appName: "T3 Code",
     scheme: "t3code",
     iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
     relyingParty: "clerk.t3.codes",
     assets: RELEASE_ASSETS,
   },
@@ -136,7 +111,7 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
     enablePushNotifications: true,
     // Frequent updates need the iOS entitlement to avoid early throttling.
     frequentUpdates: true,
-    enableAndroid: true,
+    enableAndroid: false,
     widgets: [
       {
         name: "SubscriptionUsage",
@@ -178,21 +153,11 @@ const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
             "accessoryRectangular",
           ],
         },
-        android: {
-          minWidth: 250,
-          minHeight: 180,
-          targetCellWidth: 4,
-          targetCellHeight: 3,
-          resizeMode: "both",
-          // The embedded layout renders before first launch; publishing replaces it with stored props.
-          initialLayout: "./src/widgets/SubscriptionUsage.android.tsx",
-        },
       },
       {
         name: "AgentActivity",
         displayName: "Agent Activity",
         description: "Shows the current state of active T3 Code agents.",
-        android: null,
         ios: { supportedFamilies: ["systemSmall", "systemMedium", "accessoryRectangular"] },
       },
     ],
@@ -215,20 +180,13 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
         supportsFileWithMaxCount: 8,
       },
     },
-    android: {
-      enabled: true,
-      singleShareMimeTypes: ["*/*"],
-      multipleShareMimeTypes: ["*/*"],
-    },
   },
 ];
-
-// Match iOS PostScript names on Android so RN and the native composer share fonts before runtime loading.
 
 const config: ExpoConfig = {
   name: variant.appName,
   slug: "t3-code",
-  platforms: ["ios", "android"],
+  platforms: ["ios"],
   scheme: variant.scheme,
   version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.2.0",
   runtimeVersion: {
@@ -287,33 +245,6 @@ const config: ExpoConfig = {
         : {}),
     },
   },
-  android: {
-    icon: variant.assets.appIcon,
-    package: variant.androidPackage,
-    ...(repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE
-      ? { googleServicesFile: repoEnv.T3CODE_ANDROID_GOOGLE_SERVICES_FILE }
-      : {}),
-    adaptiveIcon: {
-      backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
-      ...(variant.assets.androidAdaptiveBackgroundImage
-        ? { backgroundImage: variant.assets.androidAdaptiveBackgroundImage }
-        : {}),
-      foregroundImage: variant.assets.androidAdaptiveForeground,
-      monochromeImage: variant.assets.androidMonochromeIcon,
-    },
-    // JS back dispatch needs RN's Android 16 shim and withAndroidPredictiveBackCompat on Android 13-15.
-    predictiveBackGestureEnabled: true,
-    // expo-sensors declares this for its pedometer, which the app does not use.
-    blockedPermissions: ["android.permission.ACTIVITY_RECOGNITION"],
-    intentFilters: [
-      {
-        action: "VIEW",
-        autoVerify: true,
-        data: [{ scheme: "https", host: HOSTED_APP_HOST, pathPrefix: "/threads/" }],
-        category: ["BROWSABLE", "DEFAULT"],
-      },
-    ],
-  },
   web: {
     favicon: variant.assets.appIcon,
   },
@@ -326,22 +257,6 @@ const config: ExpoConfig = {
         ios: {
           fonts: [dmSansFonts.regular, dmSansFonts.medium, dmSansFonts.bold],
         },
-        android: {
-          fonts: [
-            {
-              fontFamily: "DMSans-Regular",
-              fontDefinitions: [{ path: dmSansFonts.regular, weight: 400 }],
-            },
-            {
-              fontFamily: "DMSans-Medium",
-              fontDefinitions: [{ path: dmSansFonts.medium, weight: 500 }],
-            },
-            {
-              fontFamily: "DMSans-Bold",
-              fontDefinitions: [{ path: dmSansFonts.bold, weight: 700 }],
-            },
-          ],
-        },
       },
     ],
     "expo-secure-store",
@@ -352,33 +267,17 @@ const config: ExpoConfig = {
     [
       "expo-notifications",
       {
-        icon: variant.assets.androidNotificationIcon,
-        color: variant.assets.androidNotificationColor,
         mode: APP_VARIANT === "development" ? "development" : "production",
       },
     ],
     // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement.
     ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
     "expo-web-browser",
-    [
-      "expo-quick-actions",
-      {
-        androidIcons: {
-          shortcut_icon: {
-            foregroundImage: variant.assets.androidAdaptiveForeground,
-            backgroundColor: variant.assets.androidAdaptiveBackgroundColor,
-            ...(variant.assets.androidAdaptiveBackgroundImage
-              ? { backgroundImage: variant.assets.androidAdaptiveBackgroundImage }
-              : {}),
-          },
-        },
-      },
-    ],
+    "expo-quick-actions",
     [
       "expo-audio",
       {
         microphonePermission: "Allow T3 Code to use your microphone for voice input.",
-        recordAudioAndroid: true,
         enableBackgroundPlayback: false,
         enableBackgroundRecording: false,
       },
@@ -389,14 +288,12 @@ const config: ExpoConfig = {
         cameraPermission: "Allow T3 Code to access your camera so you can scan pairing QR codes.",
         microphonePermission: false,
         barcodeScannerEnabled: true,
-        recordAudioAndroid: false,
       },
     ],
     [
       "expo-image-picker",
       {
         photosPermission: false,
-        // `false` makes this plugin add RECORD_AUDIO to blockedPermissions, breaking Android dictation.
         microphonePermission: "Allow T3 Code to use your microphone for voice input.",
       },
     ],
@@ -411,25 +308,11 @@ const config: ExpoConfig = {
           image: variant.assets.splashIcon,
           backgroundColor: "#0a0a0a",
         },
-        android: {
-          // Android 12+ masks the central two thirds of the 288dp canvas; adaptive layers avoid clipped corners.
-          image: variant.assets.androidSplashIcon,
-          imageWidth: 288,
-          dark: { image: variant.assets.androidSplashIcon },
-        },
       },
     ],
     [
       "expo-build-properties",
       {
-        android: {
-          minSdkVersion: 24,
-          // SDK 58 lacks Kotlin 2.3's runtime-inert annotation. R8 needs explicit InputMerger constructors for widgets.
-          extraProguardRules: [
-            "-dontwarn kotlin.MustUseReturnValues",
-            "-keep class * extends androidx.work.InputMerger { <init>(); }",
-          ].join("\n"),
-        },
         ios: {
           deploymentTarget: "18.0",
           // AppCheckCore 11.3+ includes Swift and needs module maps for these Objective-C dependencies.
@@ -445,13 +328,6 @@ const config: ExpoConfig = {
     ["expo-sensors", { motionPermission: false }],
     // Mods run in reverse order; expo-widgets must create and wipe the target before assets are added.
     ...(!isIosPersonalTeamBuild ? ["./plugins/withWidgetLogoAsset.cjs", widgetsPlugin] : []),
-    "./plugins/withAndroidNetworkSecurityConfig.cjs",
-    "./plugins/withAndroidGradleHeap.cjs",
-    "./plugins/withAndroidInputBackground.cjs",
-    "./plugins/withAndroidModernPopupMenu.cjs",
-    "./plugins/withAndroidModernAlertDialog.cjs",
-    "./plugins/withAndroidPredictiveBackCompat.cjs",
-    "./plugins/withAndroidTabletOrientation.cjs",
     ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
   ],
   extra: {

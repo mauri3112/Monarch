@@ -1,5 +1,7 @@
 # Devices
 
+> Upstream Device panel reference. For Monarch development, use the web or desktop. For explicitly requested mobile verification, choose an iOS simulator.
+
 The Device panel shows a live iOS Simulator or Android Emulator next to a
 thread, so you can watch an agent verify mobile work and tap the device
 yourself. Agents get the same device through `device_*` tools and the

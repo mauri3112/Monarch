@@ -145,8 +145,9 @@ async function runPose(
 
 async function main() {
   const args = NodeProcess.argv.slice(2);
+  const iosPoses = POSES.filter((pose) => pose.platform === "ios");
   if (args.includes("--list")) {
-    for (const pose of POSES)
+    for (const pose of iosPoses)
       NodeProcess.stdout.write(
         `${pose.id}\t${pose.device}${pose.pending ? `\t(pending: ${pose.pending})` : ""}\n`,
       );
@@ -155,13 +156,14 @@ async function main() {
   const values = (flag: string) =>
     args.flatMap((arg, index) => (args[index - 1] === flag ? [arg] : []));
   const selected = values("--pose");
-  const unknown = selected.filter((id) => !POSES.some((pose) => pose.id === id));
+  const unknown = selected.filter((id) => !iosPoses.some((pose) => pose.id === id));
   if (unknown.length) throw new Error(`Unknown pose ${unknown.join(", ")}. Run with --list.`);
   const platforms = values("--platform");
-  const poses = POSES.filter(
-    (pose) =>
-      (selected.length === 0 ? !pose.pending : selected.includes(pose.id)) &&
-      (platforms.length === 0 || platforms.includes(pose.platform)),
+  if (platforms.some((platform) => platform !== "ios")) {
+    throw new Error("Choose iOS for mobile end-to-end tests.");
+  }
+  const poses = iosPoses.filter((pose) =>
+    selected.length === 0 ? !pose.pending : selected.includes(pose.id),
   );
   const concurrencyFlag = values("--concurrency")[0];
   const concurrency = concurrencyFlag ? Number(concurrencyFlag) : undefined;
@@ -273,18 +275,7 @@ async function main() {
       }
       return result;
     };
-    // Each platform has its own workers, so each gets its own limit; one Mac runs every
-    // iOS simulator, and recording several at once on a shared pool times it out.
-    const byPlatform = await Promise.all(
-      (["ios", "android"] as const).map((platform) =>
-        mapConcurrent(
-          poses.filter((pose) => pose.platform === platform),
-          concurrency ?? (platform === "ios" ? 2 : 3),
-          runOne,
-        ),
-      ),
-    );
-    const results = poses.map((pose) => byPlatform.flat().find((result) => result.pose === pose)!);
+    const results = await mapConcurrent(poses, concurrency ?? 2, runOne);
 
     const reviewed = review
       ? await mapConcurrent(results, 4, async (result) => {

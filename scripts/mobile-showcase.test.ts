@@ -2,11 +2,13 @@
 import { assert, it } from "@effect/vitest";
 import { PNG } from "pngjs";
 
-import type { ShowcaseStoreAssetSpec } from "./mobile-showcase.config.ts";
+import showcaseConfig, { type ShowcaseStoreAssetSpec } from "./mobile-showcase.config.ts";
 import {
   encodeAndroidPairingUrls,
   normalizeStorePng,
   parsePairingCredentialOutput,
+  parseShowcaseCliArgs,
+  planShowcaseCaptures,
   readPngMetadata,
   validateStoreAsset,
 } from "./mobile-showcase.ts";
@@ -90,4 +92,13 @@ it("encodes Android pairing URLs without shell-sensitive JSON quotes", () => {
   assert.equal(encoded.startsWith("json-uri:"), true);
   assert.deepStrictEqual(JSON.parse(decodeURIComponent(encoded.slice("json-uri:".length))), urls);
   assert.equal(encoded.includes('"'), false);
+});
+
+it("selects only iOS captures and rejects retired platforms", () => {
+  const captures = planShowcaseCaptures(showcaseConfig, parseShowcaseCliArgs([]));
+  assert.isTrue(
+    captures.length > 0 && captures.every((capture) => capture.device.platform === "ios"),
+  );
+  assert.throws(() => parseShowcaseCliArgs(["--platform", "android"]), /Use ios/);
+  assert.throws(() => parseShowcaseCliArgs(["--platform", "all"]), /Use ios/);
 });

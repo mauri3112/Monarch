@@ -53,7 +53,7 @@ This published nightly was 28 commits ahead of stable `v0.1.7`, including fixes 
 
 Internal `@t3tools/*` package names and protocol identifiers remain to keep upstream integration manageable. The web UI is in `apps/web`; Electron wraps it in `apps/desktop`; provider execution and orchestration live in `apps/server`; shared contracts and client state live in `packages/contracts` and `packages/client-runtime`. Project presentation should preserve existing environment and project identities. Voice extends the Codex adapter boundary; it does not replace the orchestration engine.
 
-The `Monarch CI` workflow runs focused checks on GitHub-hosted runners. Upstream release, deployment, mobile, and maintainer workflows are restricted to the upstream repository. They are retained as reference, not enabled for this fork.
+The `Monarch CI` workflow runs focused checks on GitHub-hosted runners. Monarch builds from source for web and desktop. The upstream mobile client and mobile workflows are retained for iOS reference. Upstream release and deployment jobs are restricted to the upstream repository.
 
 ## License and attribution
 

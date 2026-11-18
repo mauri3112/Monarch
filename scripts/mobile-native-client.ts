@@ -928,7 +928,6 @@ const installIntoSession = Effect.fn("nativeClient.installIntoSession")(function
   home: string,
   platform: NativePlatform,
   session: string,
-  abi: string,
   metro: string | undefined,
 ) {
   const started = yield* Clock.currentTimeMillis;
@@ -940,13 +939,11 @@ const installIntoSession = Effect.fn("nativeClient.installIntoSession")(function
   );
   // agent-device scopes session ownership to the workspace (working directory) it runs in.
   const workspace = yield* HostProcess.WorkingDirectory;
-  const deviceAbi = platform === "android" ? abi : null;
-  const task = deviceAbi ? `native-client:android-${deviceAbi}` : `native-client:${platform}`;
+  const task = `native-client:${platform}`;
   const current = yield* fingerprint(platform);
-  const key = `${platform}/${deviceAbi ? `development-${deviceAbi}` : "development"}/${current}`;
+  const key = `${platform}/development/${current}`;
   const source = yield* sharedSource(home, key);
-  // The session's host downloads the client itself; uploading a 166 MB APK through a
-  // gateway from here takes minutes and can outlast the remote install timeout.
+  // Download on the session host to avoid transferring the app through the gateway.
   const downloadOnDevice = source
     ? command(
         node,
@@ -974,7 +971,7 @@ const installIntoSession = Effect.fn("nativeClient.installIntoSession")(function
   const artifact = fetched
     ? { source: "remote" as const, buildMs: 0 }
     : yield* Effect.gen(function* () {
-        const local = yield* resolveArtifact(home, platform, deviceAbi, current).pipe(
+        const local = yield* resolveArtifact(home, platform, null, current).pipe(
           Effect.tapError(() => reportTelemetry(home, task, "failed", 0)),
         );
         // A build just shared the client, so the device can fetch it now too.
@@ -1029,7 +1026,7 @@ const main = Command.make(
   "mobile-native-client",
   {
     mode: Argument.Literals("mode", ["check", "ensure"]),
-    platform: Argument.Literals("platform", ["ios", "android"]),
+    platform: Argument.Literals("platform", ["ios"]),
     device: Argument.String("device").pipe(Argument.optional),
     session: Flag.String("session").pipe(
       Flag.withDescription(
@@ -1037,17 +1034,13 @@ const main = Command.make(
       ),
       Flag.optional,
     ),
-    abi: Flag.Literals("abi", ["x86_64", "arm64-v8a"]).pipe(
-      Flag.withDescription("Android ABI of the session's device (default x86_64)."),
-      Flag.withDefault("x86_64" as const),
-    ),
     metro: Flag.String("metro").pipe(
       Flag.withDescription("With --session, open the dev client against this Metro URL."),
       Flag.optional,
     ),
     prepare: Flag.Boolean("prepare").pipe(
       Flag.withDescription(
-        "Fetch or build the client for this checkout without a device (Android: for --abi). Run it before leasing a device: a build can outlast the lease.",
+        "Fetch or build the client for this checkout without a device. Run it before leasing a device: a build can outlast the lease.",
       ),
       Flag.withDefault(false),
     ),
@@ -1057,7 +1050,6 @@ const main = Command.make(
     platform,
     device: requested,
     session,
-    abi: sessionAbi,
     metro,
     prepare,
   }) {
@@ -1072,12 +1064,7 @@ const main = Command.make(
       if (!home)
         return yield* new NativeClientError({ message: "HOME or USERPROFILE must be set." });
       const current = yield* fingerprint(platform);
-      const artifact = yield* resolveArtifact(
-        home,
-        platform,
-        platform === "android" ? sessionAbi : null,
-        current,
-      );
+      const artifact = yield* resolveArtifact(home, platform, null, current);
       yield* Console.error(
         `Client ready for ${platform} (${artifact.source}); lease a device and install.`,
       );
@@ -1095,13 +1082,7 @@ const main = Command.make(
       const home = environment.HOME ?? environment.USERPROFILE;
       if (!home)
         return yield* new NativeClientError({ message: "HOME or USERPROFILE must be set." });
-      return yield* installIntoSession(
-        home,
-        platform,
-        session.value,
-        sessionAbi,
-        Option.getOrUndefined(metro),
-      );
+      return yield* installIntoSession(home, platform, session.value, Option.getOrUndefined(metro));
     }
     const target = yield* resolveDevice(platform, Option.getOrUndefined(requested));
     const device = target.id;
@@ -1116,15 +1097,7 @@ const main = Command.make(
       });
     const cache = path.join(home, ".cache/t3code/native-clients");
     const recordPath = path.join(cache, platform, `${yield* digest(device)}.json`);
-    // An iOS simulator build is arm64 for every device; an APK carries only the device's own ABI.
-    const abi = Effect.gen(function* () {
-      if (platform === "ios") return null;
-      const value = yield* command("adb", ["-s", device, "shell", "getprop", "ro.product.cpu.abi"]);
-      if (value !== "x86_64" && value !== "arm64-v8a")
-        return yield* new NativeClientError({ message: `Unsupported Android ABI ${value}.` });
-      return value;
-    });
-    let task = `native-client:${platform}`;
+    const task = `native-client:${platform}`;
     let savedMs = 0;
     const operations = {
       fingerprint: fingerprint(platform),
@@ -1138,9 +1111,7 @@ const main = Command.make(
         ),
       ),
       install: Effect.fn(function* (fingerprint: string) {
-        const deviceAbi = yield* abi;
-        if (deviceAbi) task = `native-client:android-${deviceAbi}`;
-        const artifact = yield* resolveArtifact(home, platform, deviceAbi, fingerprint);
+        const artifact = yield* resolveArtifact(home, platform, null, fingerprint);
         savedMs = artifact.buildMs;
         yield* Console.error(`Installing on ${target.label}...`);
         yield* install(platform, device, artifact.file);

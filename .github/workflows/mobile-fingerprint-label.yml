@@ -90,7 +90,7 @@ jobs:
           set -euo pipefail
           gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${ARTIFACT_ID}/zip" > "$RUNNER_TEMP/fingerprint-result.zip"
           changed="$(unzip -p "$RUNNER_TEMP/fingerprint-result.zip" changed-platforms)"
-          if [[ ! "$changed" =~ ^((ios|android)( (ios|android))?)?$ ]]; then
+          if [[ ! "$changed" =~ ^(ios)?$ ]]; then
             echo "Unexpected changed-platforms value '$changed'." >&2
             exit 1
           fi

@@ -9,7 +9,7 @@ name: Mobile EAS Production
 # Every merge reconciles native fingerprints and publishes matching OTAs.
 # iOS prereleases use the testflight profile (3.0.0); App Store binaries use
 # production and the committed app version, built manually. Both receive OTAs
-# for their own major version. Android continues using production automatically.
+# for their own major version.
 # TestFlight beta review may still be required for subsequent builds.
 # Hold native-change PRs (the "📱 Native Change" label) and merge them as a
 # batch to avoid a store build per PR.
@@ -38,11 +38,9 @@ on:
         description: "Target platform"
         required: true
         type: choice
-        default: all
+        default: ios
         options:
           - ios
-          - android
-          - all
       version:
         description: "Optional build version override (blank uses profile default; store overrides are committed)"
         required: false
@@ -162,18 +160,6 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
         run: |
           eas env:pull production --non-interactive
-          # EAS commands skip dotenv, and the Android fingerprint hashes this
-          # file. Without it every merge misses the build's hash and rebuilds.
-          node --input-type=module <<'NODE'
-          import { appendFileSync, readFileSync } from "node:fs";
-          import { parseEnv } from "node:util";
-          const env = parseEnv(readFileSync(".env.local", "utf8"));
-          const googleServicesFile = env.T3CODE_ANDROID_GOOGLE_SERVICES_FILE;
-          if (!googleServicesFile) {
-            throw new Error("T3CODE_ANDROID_GOOGLE_SERVICES_FILE is missing from the production environment");
-          }
-          appendFileSync(process.env.GITHUB_ENV, `T3CODE_ANDROID_GOOGLE_SERVICES_FILE=${googleServicesFile}\n`);
-          NODE
 
       - name: Apply manual version override
         if: steps.version_app_token.outcome == 'success'
@@ -256,11 +242,10 @@ jobs:
         working-directory: apps/mobile
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_PRODUCTION_TOKEN }}
-          PLATFORM: ${{ inputs.platform || 'all' }}
+          PLATFORM: ${{ inputs.platform || 'ios' }}
         run: |
-          if [ "$PLATFORM" = "all" ]; then platforms="ios android"; else platforms="$PLATFORM"; fi
           failed=0
-          for platform in $platforms; do
+          for platform in "$PLATFORM"; do
             # eas-cli prints an environment-loaded notice to stdout before the
             # JSON even with --json, so discard everything before the document.
             expo_modules="$(eas fingerprint:generate --platform "$platform" --environment production --json --non-interactive | sed -n '/^{/,$p' | jq --arg reason "expoAutolinking${platform^}" '[.sources[] | select((.reasons // []) | index($reason))] | length')"
@@ -303,7 +288,7 @@ jobs:
         run: |
           failed=0
           message="$(git log -1 --pretty=%s | head -c 120) ($(git rev-parse --short=9 HEAD))"
-          for target in ios:production ios:testflight android:production; do
+          for target in ios:production ios:testflight; do
             platform="${target%%:*}"
             profile="${target#*:}"
             unset T3CODE_MOBILE_VERSION

@@ -6,7 +6,7 @@ The public repository is `mauri3112/Monarch`. The private Monarch plugin is sepa
 
 This is a source MVP for the web and Electron clients. There are no supported
 signed installers, npm package, hosted account service, or automated release
-channel. Mobile code is retained from upstream and is not a Monarch release.
+channel. The upstream mobile client is retained for iOS reference and testing when explicitly requested.
 Keep existing provider connectors, approvals, history, and orchestration behavior.
 Codex voice is experimental and must fail clearly when the installed app-server
 or account does not support it.
@@ -16,6 +16,8 @@ remain intentionally unchanged. Product identity, storage, telemetry, update
 sources, and service destinations belong to Monarch. Never replace those defaults
 with upstream values while merging T3 Code changes. Preserve LICENSE verbatim and
 retain third-party notices. The README records the baseline and source setup.
+
+Keep Monarch feature work on web and desktop. Android builds, testing, releases and emulator use are retired for this project. Keep upstream device compatibility separate from Monarch build and QA instructions. Preserve this scope during upstream syncs.
 
 ## Ownership when syncing upstream
 
@@ -57,10 +59,10 @@ We need to be on the same page with terminology. When communicating, use this la
 The most common defect in this repo is a change that works on the path you tested and is missing everywhere else. Before calling frontend work done, walk this list and say which entries applied:
 
 - **Entry points.** A behavior reachable from the chat view is usually also reachable from Settings, the command palette, and a keybinding. Fixing one is not fixing the feature.
-- **Clients.** Web, desktop (wraps web, adds Electron shell/IPC), and mobile (React Native, separate navigation). Shared logic lives in `packages/client-runtime`
+- **Clients.** Web and desktop (wraps web and adds Electron shell/IPC). Use the upstream iOS client only for explicitly requested mobile work. Shared logic lives in `packages/client-runtime`
 - **Providers.** Codex, Claude, Cursor, Grok, OpenCode, Antigravity, and Kiro each have an adapter. Provider-shaped features need a decision per adapter, even if the decision is "not supported here".
 - **Agents.** A capability a user can trigger is usually one an agent should reach through MCP tools, and scheduled tasks run the same paths. That only works when it is a service method, not handler code.
-- **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Change the schema and the server, web, mobile, and desktop all follow.
+- **Contracts.** Anything crossing the wire is typed in `packages/contracts`. Keep the server, web and desktop contracts in sync. Preserve upstream iOS compatibility where shared code requires it.
 - **Reverse states.** If you added a way in, add the way out and the way to see it. Snooze needs unsnooze. Close needs reopen. A one-way door is a bug.
 - **Connection modes.** Local, remote/relay, and tunnel behave differently. Multi-device and multi-environment cases are real.
 - **Docs.** Check whether the change makes existing guidance inaccurate. Apply the [documentation rules](#documentation) before adding anything.
@@ -126,7 +128,7 @@ reverse transitions that matter using fixtures, not a user's private history.
 
 - Real agent turns cost money. To watch a turn stream through the pipeline and UI, use the free `Replay (dev)` provider that `vp run dev` registers; [test-t3-app](.agents/skills/test-t3-app/SKILL.md) shows how to start one. Use a real provider only when the change depends on that provider's behavior, and then pick its cheapest model, such as Haiku for Claude or Luna for Codex.
 
-Mobile verification is outside the source MVP unless explicitly requested. When working on mobile, a missing or outdated native client is an install step. Run `vp run mobile:install <ios|android> [device-id]` on the device host before starting Metro; it targets the only booted simulator or connected Android device when the id is omitted. It installs the dev client for this checkout's native fingerprint from the shared cache in seconds and builds only when no machine has built it yet, so prefer it over `expo run:*`, `xcodebuild`, or `gradlew`, which rebuild from scratch. Its stdout is one JSON line; build output goes to the log it names. See `test-t3-mobile` for the full workflow.
+For explicitly requested verification of the upstream iOS client, run `vp run mobile:install ios [simulator-udid]` before starting Metro. See [the iOS testing workflow](.agents/skills/test-t3-mobile/SKILL.md).
 
 ## Evals
 

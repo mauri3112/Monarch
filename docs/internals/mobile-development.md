@@ -40,7 +40,7 @@ renders that never happened, because bailed-out fibers keep flags from older com
 
 [`measure-renders.mts`](../../apps/mobile/scripts/measure-renders.mts) drives a measurement from
 outside the app. It evaluates the counter's globals through Metro's Hermes inspector proxy, which
-works the same for iOS simulators and Android emulators and needs no taps, `simctl`, or `adb`. It
+works on iOS simulators without taps or `simctl`. It
 starts a real provider turn through the server, opens the thread with an app link, records a window
 mid-stream, and prints the median renders, commits, top components and top causes. Expo drops inspector sockets whose `Origin` is not the URL Metro advertises, so
 pass that URL (the LAN address with `--lan`) as `--metro`.
@@ -74,5 +74,5 @@ manual `useMemo`/`useCallback`/`memo` in the same change. Most mobile bailouts a
 for the usual rewrites. Mobile runs `t3code/no-manual-memo` with `allowMemoHooks`, so memo
 directives are errors but the hooks stay legal until `KNOWN_BAILOUTS` is empty.
 `t3code/no-hookless-use-function` rejects a `use*` function that calls no hook, since the compiler
-leaves it uncached. A platform stub of a real hook, such as an `.android.ts` file, keeps the hook
+leaves it uncached. A platform stub of a real hook, keeps the hook
 name and suppresses the rule with a reason.

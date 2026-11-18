@@ -114,16 +114,6 @@ jobs:
           EXPO_TOKEN: ${{ secrets.EXPO_PREVIEW_TOKEN }}
         run: |
           eas env:pull preview --non-interactive
-          # See mobile-eas-preview.yml: keeps Android build and OTA fingerprints matching.
-          node --input-type=module <<'NODE'
-          import { appendFileSync, readFileSync } from "node:fs";
-          import { parseEnv } from "node:util";
-          const env = parseEnv(readFileSync(".env.local", "utf8"));
-          const googleServicesFile = env.T3CODE_ANDROID_GOOGLE_SERVICES_FILE;
-          if (googleServicesFile) {
-            appendFileSync(process.env.GITHUB_ENV, `T3CODE_ANDROID_GOOGLE_SERVICES_FILE=${googleServicesFile}\n`);
-          }
-          NODE
 
       - name: Deploy with fingerprint check
         if: steps.expo-token.outputs.present == 'true'
@@ -137,7 +127,7 @@ jobs:
         with:
           profile: preview:dev
           branch: pr-${{ github.event.pull_request.number }}
-          platform: all
+          platform: ios
           environment: preview
           working-directory: apps/mobile
           github-token: ${{ secrets.GITHUB_TOKEN }}

@@ -39,15 +39,3 @@ apps/mobile/modules/t3-terminal/scripts/build-libghostty-ios16.sh
 The script builds Ghostty with Zig 0.16.0, strips the iOS archives, and replaces only the
 `ios-arm64` and `ios-arm64-simulator` slices. Xcode's Metal toolchain must be installed; if `metal`
 fails, run `xcodebuild -downloadComponent MetalToolchain`.
-
-## Rebuilding libghostty-vt for Android
-
-The checked-in Android shared libraries and headers are pinned to the revision recorded in
-`native/libghostty-vt/VERSION` at the repository root. Set `ANDROID_NDK_HOME` and run:
-
-```bash
-apps/mobile/modules/t3-terminal/scripts/build-libghostty-android.sh
-```
-
-The script downloads Zig 0.15.2 when needed, checks out the pinned upstream Ghostty revision, and
-rebuilds all four Android ABIs with 16 KB page-size support.

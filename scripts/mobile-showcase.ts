@@ -287,7 +287,7 @@ function argumentValue(args: ReadonlyArray<string>, index: number, flag: string)
 }
 
 export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
-  const platforms = new Set<ShowcaseDevice["platform"]>();
+  const platforms = new Set<ShowcaseDevice["platform"]>(["ios"]);
   const deviceIds = new Set<string>();
   const scenes = new Set<ShowcaseScene>();
   const appearances = new Set<ShowcaseAppearance>();
@@ -302,14 +302,8 @@ export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions {
     const argument = args[index];
     if (argument === "--platform") {
       const value = argumentValue(args, index, argument);
-      if (value !== "ios" && value !== "android" && value !== "all") {
-        throw new Error(`Unsupported platform '${value}'. Use ios, android, or all.`);
-      }
-      if (value === "all") {
-        platforms.add("ios");
-        platforms.add("android");
-      } else {
-        platforms.add(value);
+      if (value !== "ios") {
+        throw new Error(`Unsupported platform '${value}'. Use ios.`);
       }
       index += 1;
     } else if (argument === "--device") {
@@ -420,13 +414,13 @@ Usage:
   pnpm --filter @t3tools/mobile screenshots [options]
 
 Options:
-  --platform ios|android|all  Capture one platform (repeatable)
+  --platform ios             Capture iPhone and iPad screenshots
   --device <id>              Capture one configured device (repeatable)
   --scene <name>             Capture one scene (repeatable)
   --appearance light|dark|both
                              Override the configured appearance
   --theme <id>|all           Override the configured palette (repeatable)
-  --skip-build               Reuse the existing simulator app / debug APK
+  --skip-build               Reuse the existing simulator app
   --skip-metro               Reuse an already running showcase Metro server
   --keep-running             Leave devices and Metro running after capture
   --validate-only            Validate existing upload assets without capturing
@@ -437,8 +431,9 @@ Themes: ${SHOWCASE_THEMES.join(", ")}
 
 Configured devices:
 ${config.devices
+  .filter((device) => device.platform === "ios")
   .map((device) => {
-    const target = device.platform === "ios" ? device.simulator : device.avd;
+    const target = device.simulator;
     return `  ${device.id.padEnd(18)} ${device.platform.padEnd(8)} ${target} -> ${device.storeAsset.directory}/{light|dark}/<theme> (${device.storeAsset.width}×${device.storeAsset.height}, default ${device.appearance} ${device.theme}) [${device.scenes.join(", ")}]`;
   })
   .join("\n")}
